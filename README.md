@@ -23,11 +23,29 @@ in-my-pocket/
 └── tests/       Cross-cutting integration tests.
 ```
 
-For the full design, read `docs/multi-game-platform.md`. For
-authoring a new game module, read
-`docs/in-my-pocket-game-author-guide.md`.
+## Docs
+
+- `docs/codebase-tour.md` — start here. Short walkthrough of how the
+  pieces fit together.
+- `docs/multi-game-platform.md` — design authority (longer, deeper).
+- `docs/in-my-pocket-game-author-guide.md` — contract for adding a
+  game module.
 
 ## Status
 
-Skeleton. The interfaces in `shared/` are real; `platform/` and
-`web/` are stubs. Phase 2 (per the design doc) is what fills them in.
+Phase 2 (server: auth / tables / saves / WS routing) and Phase 3 (UI
+shell: login, tables, table view, saves library) are in. One game is
+registered: **Coke and Iron** (sibling repo, `file:` linked). Phase 4
+(deploy) and Phase 5+ (more games) are open.
+
+## Local dev
+
+```powershell
+$env:DATA_DIR = "./data"
+npm run cli -- db init
+npm run cli -- invite mint --uses 5
+# copy the printed code, then:
+npm run server
+# in a second window:
+npm run dev   # vite, http://localhost:5173
+```
