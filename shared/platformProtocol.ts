@@ -16,12 +16,11 @@ export const PLATFORM_PROTOCOL_VERSION = 1;
 // Client → Server
 // ---------------------------------------------------------------------------
 
+// Auth (signup, login, logout, me) is HTTP-only — see platform/auth/routes.ts.
+// The WS upgrade verifies the JWT cookie set by those endpoints; once the
+// socket opens, the user is already authenticated.
+
 export type ClientMessage =
-  // --- Auth ---
-  | { type: "SIGNUP"; username: string; password: string; inviteCode: string }
-  | { type: "LOGIN"; username: string; password: string }
-  | { type: "LOGOUT" }
-  | { type: "ME" }
   // --- Tables ---
   | { type: "CREATE_TABLE"; gameId: GameId; name: string; isPrivate: boolean; options: Record<string, unknown> }
   | { type: "LIST_TABLES"; filter?: TableFilter }
@@ -44,9 +43,10 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: "HELLO"; protocolVersion: number }
   | { type: "ERROR"; reason: string; cause?: string }
-  // --- Auth ---
+  // --- Auth (the WS sends ME_OK once after the cookie-derived
+  //          user is identified; further auth state changes happen
+  //          out-of-band and the client must reconnect to refresh) ---
   | { type: "ME_OK"; user: UserSummary | null }
-  | { type: "AUTH_OK"; user: UserSummary }
   // --- Tables ---
   | { type: "TABLES_LIST"; tables: readonly TableSummary[] }
   | { type: "TABLE_STATE"; table: TableState }
