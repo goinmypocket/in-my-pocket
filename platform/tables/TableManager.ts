@@ -140,10 +140,14 @@ export class TableManager {
     this.tables.set(tableId, live);
 
     // Host auto-claims seat 0 and is attached so they receive game
-    // messages (LOBBY_STATE, etc.) right away.
-    const claim = session.claimSeat(opts.hostUserId, 0);
+    // messages (LOBBY_STATE, etc.) right away. The displayName is
+    // forwarded so the game can default-init the seat identity.
+    const hostSummary = this.userSummary(opts.hostUserId);
+    const claim = session.claimSeat(opts.hostUserId, 0, {
+      displayName: hostSummary.username,
+    });
     if (claim.ok) {
-      live.slots[0] = { ...live.slots[0]!, claimedBy: this.userSummary(opts.hostUserId) };
+      live.slots[0] = { ...live.slots[0]!, claimedBy: hostSummary };
       tablesDb.setSlotClaim(this.db, tableId, 0, opts.hostUserId);
     }
     if (this.connections.isOnline(opts.hostUserId)) {
@@ -261,10 +265,13 @@ export class TableManager {
     this.maybeReleaseSeats(t, userId, seatIndex);
     t.spectators.delete(userId);
 
-    const claim = t.session.claimSeat(userId, seatIndex);
+    const summary = this.userSummary(userId);
+    const claim = t.session.claimSeat(userId, seatIndex, {
+      displayName: summary.username,
+    });
     if (!claim.ok) return claim;
 
-    t.slots[seatIndex] = { ...slot, claimedBy: this.userSummary(userId) };
+    t.slots[seatIndex] = { ...slot, claimedBy: summary };
     tablesDb.setSlotClaim(this.db, tableId, seatIndex, userId);
     this.attach(t, userId);
     t.lastActivityAt = Date.now();

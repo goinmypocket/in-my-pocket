@@ -6,6 +6,7 @@ import type {
 } from "../../../shared/platformProtocol";
 import { useAuth } from "../AuthContext";
 import { useClient } from "../PlatformClientContext";
+import { GameMount } from "../GameMount";
 
 interface Props {
   tableId: string;
@@ -180,17 +181,7 @@ export function TableScreen({ tableId, onLeave }: Props) {
             <p>The host will start the game when seats are filled.</p>
           </div>
         ) : (
-          <div className="im-table__game">
-            <p>
-              Game UI for <code>{state.gameId}</code> would mount here. The
-              platform would lazy-load <code>games/{state.gameId}/web/App.tsx</code>{" "}
-              and pass it the table context.
-            </p>
-            <p>
-              No game module is registered yet — see{" "}
-              <code>platform/games/registry.ts</code>.
-            </p>
-          </div>
+          user && <GameMount table={state} userId={user.id} />
         )}
       </main>
     </div>

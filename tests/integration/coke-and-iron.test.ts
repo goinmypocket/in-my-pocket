@@ -151,6 +151,67 @@ describe("coke-and-iron via the platform", () => {
     await ws.close();
   });
 
+  it("create → join → start with auto-identity → intent broadcasts to both", async () => {
+    // Mint two invites for this run.
+    const db = openDb(dataDir);
+    const codeA = generateInviteCode();
+    const codeB = generateInviteCode();
+    invitesDb.insertInvite(db, { code: codeA, maxUses: 1 });
+    invitesDb.insertInvite(db, { code: codeB, maxUses: 1 });
+    db.close();
+
+    const alice = await signup("auto-alice", codeA);
+    const bob = await signup("auto-bob", codeB);
+    const aliceWs = await openWs(alice.cookie);
+    const bobWs = await openWs(bob.cookie);
+    await aliceWs.waitFor((m) => m.type === "ME_OK");
+    await bobWs.waitFor((m) => m.type === "ME_OK");
+
+    aliceWs.send({
+      type: "CREATE_TABLE",
+      gameId: "coke-and-iron" as never,
+      name: "Auto-identity table",
+      isPrivate: false,
+      options: { seed: 7, autoEndTurn: false, allowUndo: true },
+    });
+    const created = await aliceWs.waitFor((m) => m.type === "TABLE_STATE");
+    if (created.type !== "TABLE_STATE") throw new Error("expected TABLE_STATE");
+    const tableId = created.table.id;
+
+    bobWs.send({ type: "JOIN_TABLE", tableId, seatIndex: 1, kind: "player" });
+    await bobWs.waitFor((m) => m.type === "TABLE_STATE");
+
+    // Start without sending SET_SEAT_IDENTITY — the platform's
+    // username should auto-fill into displayName.
+    aliceWs.msgs.length = 0;
+    bobWs.msgs.length = 0;
+    aliceWs.send({ type: "START_GAME", tableId });
+
+    const aliceSnap = await aliceWs.waitFor(
+      (m) =>
+        m.type === "GAME_MSG_OUT" &&
+        (m.payload as { type?: string }).type === "SNAPSHOT",
+    );
+    if (aliceSnap.type !== "GAME_MSG_OUT")
+      throw new Error("expected SNAPSHOT");
+    const aliceEnv = (aliceSnap.payload as { playing: { viewerPlayerId: number } })
+      .playing;
+    expect(aliceEnv.viewerPlayerId).toBe(0);
+
+    const bobSnap = await bobWs.waitFor(
+      (m) =>
+        m.type === "GAME_MSG_OUT" &&
+        (m.payload as { type?: string }).type === "SNAPSHOT",
+    );
+    if (bobSnap.type !== "GAME_MSG_OUT") throw new Error("expected SNAPSHOT");
+    const bobEnv = (bobSnap.payload as { playing: { viewerPlayerId: number } })
+      .playing;
+    expect(bobEnv.viewerPlayerId).toBe(1);
+
+    await aliceWs.close();
+    await bobWs.close();
+  });
+
   it("create → claim → set identity → start emits SNAPSHOT to both seats", async () => {
     const alice = await signup("ci-bob", INVITE_B);
     const aliceWs = await openWs(alice.cookie);
