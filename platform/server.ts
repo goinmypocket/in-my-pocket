@@ -191,15 +191,31 @@ async function handleHttp(
   res: ServerResponse,
   ctx: HttpCtx,
 ): Promise<void> {
-  if (await handleAuthHttp(req, res, ctx)) return;
+  try {
+    if (await handleAuthHttp(req, res, ctx)) return;
 
-  if (ctx.staticDir && (req.method === "GET" || req.method === "HEAD")) {
-    if (serveStatic(req, res, ctx.staticDir)) return;
+    if (ctx.staticDir && (req.method === "GET" || req.method === "HEAD")) {
+      if (serveStatic(req, res, ctx.staticDir)) return;
+    }
+
+    res.statusCode = 404;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "not found" }));
+  } catch (err) {
+    console.error("[in-my-pocket] http error", req.method, req.url, err);
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          error: "internal error",
+          cause: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } else if (!res.writableEnded) {
+      res.end();
+    }
   }
-
-  res.statusCode = 404;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify({ error: "not found" }));
 }
 
 const MIME: Record<string, string> = {
