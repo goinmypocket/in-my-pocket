@@ -92,3 +92,33 @@ export function deleteSave(
     .run(id, ownerUserId);
   return result.changes > 0;
 }
+
+/** Owner-gated overwrite. Returns true if the row matched and was
+ *  updated; false if the saveId is unknown or owned by someone else
+ *  (caller should fall back to "save as new"). */
+export function updateSave(
+  db: Db,
+  s: {
+    id: SaveId;
+    ownerUserId: UserId;
+    name: string;
+    bytes: Buffer;
+    summary: Record<string, unknown>;
+  },
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE saves
+          SET name = ?, bytes = ?, summary_json = ?, updated_at = ?
+        WHERE id = ? AND owner_user_id = ?`,
+    )
+    .run(
+      s.name,
+      s.bytes,
+      JSON.stringify(s.summary),
+      new Date().toISOString(),
+      s.id,
+      s.ownerUserId,
+    );
+  return result.changes > 0;
+}

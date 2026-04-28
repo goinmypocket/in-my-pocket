@@ -191,6 +191,107 @@ button {
   padding: 0.4rem;
   border-radius: 4px;
 }
+
+/* Playing-phase layout — game gets full bleed, table chrome lives in
+   a drawer behind a hamburger button. */
+.im-table--playing {
+  display: block;
+  position: relative;
+  height: calc(100vh - 4rem); /* leaves room for the platform top nav */
+  margin: -1.5rem; /* counteracts im-shell__content padding */
+}
+.im-table__game-fullbleed {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: white;
+}
+.im-table__drawer-toggle {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 5;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid #d4d4d8;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 6px;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+.im-table__drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.18);
+  z-index: 9;
+}
+.im-table__drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(320px, 90vw);
+  background: white;
+  z-index: 10;
+  padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 4px 0 12px rgba(0,0,0,0.12);
+  animation: im-drawer-in 0.18s ease-out;
+}
+@keyframes im-drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.im-table__drawer-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  border: 0;
+  background: transparent;
+  font-size: 1.1rem;
+}
+
+/* Save dialog */
+.im-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.im-modal {
+  background: white;
+  border-radius: 8px;
+  padding: 1.25rem;
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+}
+.im-modal h3 { margin: 0; }
+.im-modal__hint { font-size: 0.9rem; color: #555; margin: 0; }
+.im-modal__row {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+.im-modal hr { width: 100%; border: 0; border-top: 1px solid #e5e7eb; }
+.im-modal input {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
 .im-table__content {
   background: white;
   border: 1px solid #e1e3e7;

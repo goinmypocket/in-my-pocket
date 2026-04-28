@@ -56,6 +56,11 @@ interface LiveTable {
   spectators: Set<UserId>;
   attached: Set<UserId>;
   lastActivityAt: number;
+  /** The save this table is associated with — set when loaded from a
+   *  save or after a successful SAVE_TABLE. The host-side UI reads
+   *  this to offer overwrite-vs-new on subsequent saves. */
+  currentSaveId: SaveId | null;
+  currentSaveName: string | null;
 }
 
 export class TableManager {
@@ -143,6 +148,8 @@ export class TableManager {
       spectators: new Set(),
       attached: new Set(),
       lastActivityAt: Date.now(),
+      currentSaveId: null,
+      currentSaveName: null,
     };
     this.tables.set(tableId, live);
 
@@ -235,6 +242,8 @@ export class TableManager {
       spectators: new Set(),
       attached: new Set(),
       lastActivityAt: Date.now(),
+      currentSaveId: opts.saveId,
+      currentSaveName: row.name,
     });
     return { ok: true, tableId };
   }
@@ -423,28 +432,56 @@ export class TableManager {
     callerUserId: UserId,
     tableId: TableId,
     name: string,
-  ): { ok: true; saveId: SaveId } | { ok: false; reason: string } {
+    overwriteSaveId?: SaveId,
+  ): { ok: true; saveId: SaveId; overwrote: boolean } | { ok: false; reason: string } {
     const t = this.tables.get(tableId);
     if (!t) return { ok: false, reason: "no such table" };
     if (t.hostUserId !== callerUserId)
       return { ok: false, reason: "only host can save" };
     const blob = t.session.serialize();
     const desc = t.session.describe();
+    const bytes = Buffer.from(JSON.stringify(blob), "utf8");
+    const summary = {
+      playerCount: desc.playerCount,
+      maxPlayers: desc.maxPlayers,
+      status: desc.status,
+      headline: desc.headline ?? null,
+    };
+
+    if (overwriteSaveId) {
+      const existing = savesDb.getSave(this.db, overwriteSaveId);
+      if (!existing) return { ok: false, reason: "save not found" };
+      if (existing.ownerUserId !== callerUserId)
+        return { ok: false, reason: "not your save" };
+      if (existing.gameId !== t.gameId)
+        return { ok: false, reason: "save is for a different game" };
+      const updated = savesDb.updateSave(this.db, {
+        id: overwriteSaveId,
+        ownerUserId: callerUserId,
+        name,
+        bytes,
+        summary,
+      });
+      if (!updated) return { ok: false, reason: "overwrite failed" };
+      t.currentSaveId = overwriteSaveId;
+      t.currentSaveName = name;
+      this.broadcastTableState(t);
+      return { ok: true, saveId: overwriteSaveId, overwrote: true };
+    }
+
     const saveId = asSaveId(nanoid());
     savesDb.insertSave(this.db, {
       id: saveId,
       ownerUserId: callerUserId,
       gameId: t.gameId,
       name,
-      bytes: Buffer.from(JSON.stringify(blob), "utf8"),
-      summary: {
-        playerCount: desc.playerCount,
-        maxPlayers: desc.maxPlayers,
-        status: desc.status,
-        headline: desc.headline ?? null,
-      },
+      bytes,
+      summary,
     });
-    return { ok: true, saveId };
+    t.currentSaveId = saveId;
+    t.currentSaveName = name;
+    this.broadcastTableState(t);
+    return { ok: true, saveId, overwrote: false };
   }
 
   listSavesForUser(userId: UserId): SaveSummary[] {
@@ -576,6 +613,8 @@ export class TableManager {
       status: t.status,
       options: t.options,
       slots: t.slots.map((s) => ({ ...s })),
+      currentSaveId: t.currentSaveId,
+      currentSaveName: t.currentSaveName,
     };
   }
 

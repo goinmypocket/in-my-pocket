@@ -33,7 +33,14 @@ export type ClientMessage =
   | { type: "START_GAME"; tableId: TableId }
   | { type: "DELETE_TABLE"; tableId: TableId }
   // --- Saves ---
-  | { type: "SAVE_TABLE"; tableId: TableId; name: string }
+  | {
+      type: "SAVE_TABLE";
+      tableId: TableId;
+      name: string;
+      /** When set, overwrite this existing save row (host-only,
+       *  owner-gated). When omitted, a new save is created. */
+      overwriteSaveId?: SaveId;
+    }
   | { type: "LIST_SAVES" }
   | { type: "LOAD_TABLE"; saveId: SaveId; name: string; isPrivate: boolean }
   | { type: "DELETE_SAVE"; saveId: SaveId }
@@ -98,6 +105,11 @@ export interface TableState {
   readonly status: "lobby" | "playing" | "finished";
   readonly options: Record<string, unknown>;
   readonly slots: readonly TableSlot[];
+  /** The most recent save this table is associated with (loaded from
+   *  or saved to). The host UI uses this to offer overwrite vs new
+   *  on the next save. null until the first save / load. */
+  readonly currentSaveId: SaveId | null;
+  readonly currentSaveName: string | null;
 }
 
 export interface TableSlot {

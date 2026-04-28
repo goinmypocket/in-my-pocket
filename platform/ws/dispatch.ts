@@ -100,6 +100,9 @@ export function dispatchMessage(
         userId,
         asTableId(msg.tableId),
         msg.name,
+        msg.overwriteSaveId !== undefined
+          ? asSaveId(msg.overwriteSaveId)
+          : undefined,
       );
       if (!result.ok) return fail(result.reason);
       const saves = tableManager.listSavesForUser(userId);
