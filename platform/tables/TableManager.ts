@@ -81,11 +81,17 @@ export class TableManager {
     const def = this.registry.get(opts.gameId);
     if (!def) return { ok: false, reason: "unknown game" };
 
+    // Let the game fill in defaults (e.g. random seed) and persist the
+    // effective options so they survive a platform restart.
+    const effectiveOptions = def.normalizeOptions
+      ? def.normalizeOptions(opts.options)
+      : opts.options;
+
     const tableId = asTableId(nanoid());
     const session = def.createSession({
       tableId,
       hostUserId: opts.hostUserId,
-      options: opts.options,
+      options: effectiveOptions,
     });
 
     const slots: TableSlot[] = [];
@@ -108,6 +114,7 @@ export class TableManager {
         joinCode: null,
         status: "lobby",
         loadedSaveId: null,
+        options: effectiveOptions,
         createdAt: now,
         updatedAt: now,
       });
@@ -131,7 +138,7 @@ export class TableManager {
       name: opts.name,
       isPrivate: opts.isPrivate,
       status: "lobby",
-      options: opts.options,
+      options: effectiveOptions,
       slots,
       spectators: new Set(),
       attached: new Set(),
@@ -199,6 +206,7 @@ export class TableManager {
         joinCode: null,
         status: "lobby",
         loadedSaveId: opts.saveId,
+        options: {},
         createdAt: now,
         updatedAt: now,
       });
@@ -325,6 +333,27 @@ export class TableManager {
     });
     t.lastActivityAt = Date.now();
     this.broadcastTableState(t);
+    return { ok: true };
+  }
+
+  deleteTable(callerUserId: UserId, tableId: TableId): Result {
+    const t = this.tables.get(tableId);
+    if (!t) return { ok: false, reason: "no such table" };
+    if (t.hostUserId !== callerUserId) {
+      return { ok: false, reason: "only the host can delete" };
+    }
+    // Tell every attached user the table's gone, then tear it down.
+    const audience = new Set<UserId>(t.attached);
+    for (const s of t.slots) if (s.claimedBy) audience.add(s.claimedBy.id);
+    for (const u of t.spectators) audience.add(u);
+    this.connections.broadcastToUsers(audience, {
+      type: "TABLE_CLOSED",
+      tableId,
+      reason: "host deleted the table",
+    });
+    for (const userId of t.attached) t.session.detachConnection(userId);
+    this.tables.delete(tableId);
+    tablesDb.deleteTable(this.db, tableId);
     return { ok: true };
   }
 

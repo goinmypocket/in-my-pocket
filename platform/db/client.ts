@@ -21,5 +21,24 @@ export function openDb(dataDir: string): Db {
   const schema = readFileSync(SCHEMA_PATH, "utf8");
   db.exec(schema);
 
+  // Idempotent migrations for existing dev DBs that predate a column.
+  // SQLite's ALTER TABLE has no IF NOT EXISTS, so we read the column
+  // list and add what's missing. Each entry is { table, column, ddl }.
+  const migrations = [
+    {
+      table: "tables",
+      column: "options_json",
+      ddl: "ALTER TABLE tables ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'",
+    },
+  ];
+  for (const m of migrations) {
+    const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as {
+      name: string;
+    }[];
+    if (!cols.some((c) => c.name === m.column)) {
+      db.exec(m.ddl);
+    }
+  }
+
   return db;
 }

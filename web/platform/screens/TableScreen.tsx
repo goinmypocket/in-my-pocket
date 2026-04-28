@@ -171,6 +171,19 @@ export function TableScreen({ tableId, onLeave }: Props) {
 
         <button onClick={leave}>Leave table</button>
 
+        {isHost && (
+          <button
+            className="im-table__delete"
+            onClick={() => {
+              if (!confirm(`Delete table "${state.name}"? This kicks everyone.`)) return;
+              send({ type: "DELETE_TABLE", tableId: asTableId(tableId) });
+              onLeave();
+            }}
+          >
+            Delete table
+          </button>
+        )}
+
         {error && <div className="im-error">{error}</div>}
       </aside>
 

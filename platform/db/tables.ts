@@ -13,6 +13,7 @@ export interface TableRow {
   readonly joinCode: string | null;
   readonly status: TableStatus;
   readonly loadedSaveId: SaveId | null;
+  readonly options: Record<string, unknown>;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -26,11 +27,21 @@ interface RawTableRow {
   join_code: string | null;
   status: TableStatus;
   loaded_save_id: string | null;
+  options_json: string;
   created_at: string;
   updated_at: string;
 }
 
 function fromTableRow(r: RawTableRow): TableRow {
+  let options: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(r.options_json ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      options = parsed as Record<string, unknown>;
+    }
+  } catch {
+    options = {};
+  }
   return {
     id: asTableId(r.id),
     gameId: asGameId(r.game_id),
@@ -40,6 +51,7 @@ function fromTableRow(r: RawTableRow): TableRow {
     joinCode: r.join_code,
     status: r.status,
     loadedSaveId: r.loaded_save_id ? asSaveId(r.loaded_save_id) : null,
+    options,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -77,8 +89,8 @@ export function insertTable(db: Db, t: TableRow): void {
   db.prepare(
     `INSERT INTO tables
        (id, game_id, host_user_id, name, is_private, join_code, status,
-        loaded_save_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        loaded_save_id, options_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     t.id,
     t.gameId,
@@ -88,6 +100,7 @@ export function insertTable(db: Db, t: TableRow): void {
     t.joinCode,
     t.status,
     t.loadedSaveId,
+    JSON.stringify(t.options),
     t.createdAt,
     t.updatedAt,
   );

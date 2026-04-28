@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS tables (
   join_code       TEXT,
   status          TEXT NOT NULL,
   loaded_save_id  TEXT REFERENCES saves(id),
+  options_json    TEXT NOT NULL DEFAULT '{}',
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );

@@ -89,6 +89,12 @@ export function dispatchMessage(
       return;
     }
 
+    case "DELETE_TABLE": {
+      const result = tableManager.deleteTable(userId, asTableId(msg.tableId));
+      if (!result.ok) fail(result.reason);
+      return;
+    }
+
     case "SAVE_TABLE": {
       const result = tableManager.saveTable(
         userId,

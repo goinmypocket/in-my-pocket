@@ -42,6 +42,12 @@ export interface GameDefinition<Save = unknown> {
    *  came from a prior `serialize()`; the platform stores it as bytes
    *  and hands it back unchanged. */
   loadSession(blob: Save, opts: LoadOpts): GameSession<Save>;
+
+  /** Optional. Called by the platform on createTable BEFORE
+   *  createSession, with the raw options the user submitted. The game
+   *  can fill in defaults (e.g. random seed) and the platform persists
+   *  the returned object as the effective options for that table. */
+  normalizeOptions?(options: Record<string, unknown>): Record<string, unknown>;
 }
 
 /** Per-table runtime. One instance lives in memory while a table is

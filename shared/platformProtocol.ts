@@ -31,6 +31,7 @@ export type ClientMessage =
   | { type: "LEAVE_TABLE"; tableId: TableId }
   | { type: "KICK_USER"; tableId: TableId; seatIndex: number }
   | { type: "START_GAME"; tableId: TableId }
+  | { type: "DELETE_TABLE"; tableId: TableId }
   // --- Saves ---
   | { type: "SAVE_TABLE"; tableId: TableId; name: string }
   | { type: "LIST_SAVES" }

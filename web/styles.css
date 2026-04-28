@@ -183,6 +183,14 @@ button {
   border-radius: 4px;
 }
 .im-table__hint { font-size: 0.85rem; color: #555; }
+.im-table__delete {
+  margin-top: 0.5rem;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  padding: 0.4rem;
+  border-radius: 4px;
+}
 .im-table__content {
   background: white;
   border: 1px solid #e1e3e7;
