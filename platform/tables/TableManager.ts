@@ -22,6 +22,7 @@ import type { GameDefinition, GameSession, Result } from "../../shared/GameDefin
 import type { GameId, SaveId, TableId, UserId } from "../../shared/ids";
 import { asSaveId, asTableId } from "../../shared/ids";
 import type {
+  GameInfo,
   SaveSummary,
   ServerMessage,
   TableSlot,
@@ -425,6 +426,17 @@ export class TableManager {
   // ---------------------------------------------------------------------------
   // Read API for protocol responses
   // ---------------------------------------------------------------------------
+
+  listGames(): GameInfo[] {
+    return this.registry.list().map((def) => ({
+      id: def.id,
+      displayName: def.displayName,
+      minPlayers: def.minPlayers,
+      maxPlayers: def.maxPlayers,
+      supportsSpectators: def.supportsSpectators,
+      optionsSchema: def.optionsSchema,
+    }));
+  }
 
   getTableState(tableId: TableId): TableState | null {
     const t = this.tables.get(tableId);

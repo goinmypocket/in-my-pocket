@@ -27,6 +27,11 @@ export function dispatchMessage(
   };
 
   switch (msg.type) {
+    case "LIST_GAMES": {
+      reply({ type: "GAMES_LIST", games: tableManager.listGames() });
+      return;
+    }
+
     case "CREATE_TABLE": {
       const result = tableManager.createTable({
         hostUserId: userId,

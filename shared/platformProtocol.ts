@@ -8,6 +8,7 @@
 // change. Each game module versions its own protocol independently.
 // =============================================================================
 
+import type { OptionsSchema } from "./GameDefinition";
 import type { GameId, SaveId, TableId, UserId } from "./ids";
 
 export const PLATFORM_PROTOCOL_VERSION = 1;
@@ -21,6 +22,8 @@ export const PLATFORM_PROTOCOL_VERSION = 1;
 // socket opens, the user is already authenticated.
 
 export type ClientMessage =
+  // --- Games ---
+  | { type: "LIST_GAMES" }
   // --- Tables ---
   | { type: "CREATE_TABLE"; gameId: GameId; name: string; isPrivate: boolean; options: Record<string, unknown> }
   | { type: "LIST_TABLES"; filter?: TableFilter }
@@ -47,6 +50,8 @@ export type ServerMessage =
   //          user is identified; further auth state changes happen
   //          out-of-band and the client must reconnect to refresh) ---
   | { type: "ME_OK"; user: UserSummary | null }
+  // --- Games ---
+  | { type: "GAMES_LIST"; games: readonly GameInfo[] }
   // --- Tables ---
   | { type: "TABLES_LIST"; tables: readonly TableSummary[] }
   | { type: "TABLE_STATE"; table: TableState }
@@ -99,6 +104,15 @@ export interface TableSlot {
   readonly kind: "player" | "spectator";
   readonly claimedBy: UserSummary | null;
   readonly displayName?: string;
+}
+
+export interface GameInfo {
+  readonly id: GameId;
+  readonly displayName: string;
+  readonly minPlayers: number;
+  readonly maxPlayers: number;
+  readonly supportsSpectators: boolean;
+  readonly optionsSchema: OptionsSchema;
 }
 
 export interface SaveSummary {
