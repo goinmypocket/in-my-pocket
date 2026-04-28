@@ -264,7 +264,18 @@ function serveStatic(
   return true;
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`) {
+// "is this file the entrypoint?" on Windows + Node + tsx is fiddly:
+// import.meta.url uses file:/// (three slashes) and process.argv[1] is a
+// raw OS path. Normalise both through fileURLToPath / resolve before
+// comparing.
+import { fileURLToPath } from "node:url";
+import { resolve as resolvePath } from "node:path";
+const argvEntry = process.argv[1];
+const isMain =
+  argvEntry !== undefined &&
+  resolvePath(fileURLToPath(import.meta.url)).toLowerCase() ===
+    resolvePath(argvEntry).toLowerCase();
+if (isMain) {
   const port = Number(process.env["PORT"] ?? 8787);
   const dataDir = process.env["DATA_DIR"] ?? "./data";
   const staticDir = process.env["STATIC_DIR"];
