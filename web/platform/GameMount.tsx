@@ -26,7 +26,6 @@ import { useClient } from "./PlatformClientContext";
 // React component. Vite's lazy-import plumbing handles code-splitting.
 const GAME_LOADERS: Record<string, () => Promise<{ default: ComponentType<GameProps> }>> = {
   "coke-and-iron": async () => {
-    await import("coke-and-iron/web/styles.css");
     const mod = await import("coke-and-iron/web");
     return { default: mod.default as unknown as ComponentType<GameProps> };
   },
