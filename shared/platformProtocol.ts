@@ -110,6 +110,11 @@ export interface TableState {
    *  on the next save. null until the first save / load. */
   readonly currentSaveId: SaveId | null;
   readonly currentSaveName: string | null;
+  /** Slot indices a player can claim right now. Populated from the
+   *  session's describe(). In lobby every slot is claimable; once
+   *  the game has started only the seats that were actually in play
+   *  remain claimable (others were never engine seats). */
+  readonly playableSeatIndices: readonly number[];
 }
 
 export interface TableSlot {

@@ -128,4 +128,10 @@ export interface SessionDescription {
   readonly lastActivityAt: number;
   /** Optional free-form summary the table list can render. */
   readonly headline?: string;
+  /** Slot indices that are claimable as a player. In lobby this is
+   *  every seat; once the game starts only the seats that were
+   *  claimed at start time remain playable (others were never engine
+   *  seats and can't be added retroactively). When omitted the
+   *  platform falls back to "every slot 0..maxPlayers-1". */
+  readonly playableSeatIndices?: readonly number[];
 }

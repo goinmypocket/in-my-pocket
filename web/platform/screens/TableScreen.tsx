@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { asSaveId, asTableId } from "../../../shared/ids";
 import type {
   ServerMessage,
@@ -7,6 +7,7 @@ import type {
 import { useAuth } from "../AuthContext";
 import { useClient } from "../PlatformClientContext";
 import { GameMount } from "../GameMount";
+import { useProvideDrawerContent, useTableDrawer } from "../TableDrawerContext";
 
 interface Props {
   tableId: string;
@@ -16,11 +17,11 @@ interface Props {
 export function TableScreen({ tableId, onLeave }: Props) {
   const { send, subscribe, status } = useClient();
   const { user } = useAuth();
+  const drawer = useTableDrawer();
   const [state, setState] = useState<TableState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [closed, setClosed] = useState<string | null>(null);
   const [saveDialog, setSaveDialog] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (status !== "open") return;
@@ -44,10 +45,57 @@ export function TableScreen({ tableId, onLeave }: Props) {
     return unsub;
   }, [status, send, subscribe, tableId]);
 
-  function leave(): void {
+  // "Back to tables" — navigate away but DON'T release the seat.
+  // The user's slot stays held; reconnecting takes them back to it.
+  const backToTables = onLeave;
+
+  // "Give up your seat" — explicit release. Slot becomes claimable
+  // by anyone (or remains empty in a started game until reclaimed).
+  function giveUpSeat(): void {
     send({ type: "LEAVE_TABLE", tableId: asTableId(tableId) });
-    onLeave();
   }
+
+  const isHost = user !== null && state !== null && state.hostUserId === user.id;
+  const myUserId = user?.id ?? null;
+  const mySeat = state?.slots.find((s) => s.claimedBy?.id === myUserId) ?? null;
+  const isPlaying = state?.status === "playing";
+
+  // Provide drawer content for the platform top-nav hamburger.
+  const drawerContent = useMemo(() => {
+    if (!state) return null;
+    return (
+      <SidebarContent
+        state={state}
+        tableId={tableId}
+        isHost={isHost}
+        myUserId={myUserId}
+        mySeat={mySeat}
+        send={send}
+        onSaveClick={() => {
+          setSaveDialog(true);
+          drawer.close();
+        }}
+        onBack={() => {
+          drawer.close();
+          backToTables();
+        }}
+        onGiveUpSeat={() => {
+          if (
+            !confirm(
+              "Give up your seat? Another player will be able to claim it.",
+            )
+          )
+            return;
+          giveUpSeat();
+          drawer.close();
+        }}
+        error={error}
+      />
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, tableId, isHost, myUserId, mySeat, error]);
+
+  useProvideDrawerContent(drawerContent);
 
   if (closed) {
     return (
@@ -68,31 +116,14 @@ export function TableScreen({ tableId, onLeave }: Props) {
     );
   }
 
-  const isHost = user !== null && state.hostUserId === user.id;
-  const myUserId = user?.id ?? null;
-  const mySeat = state.slots.find((s) => s.claimedBy?.id === myUserId);
-  const isPlaying = state.status === "playing";
-
-  const sidebar = (
-    <SidebarContent
-      state={state}
-      tableId={tableId}
-      isHost={isHost}
-      myUserId={myUserId}
-      mySeat={mySeat ?? null}
-      send={send}
-      onSaveClick={() => setSaveDialog(true)}
-      onLeave={leave}
-      error={error}
-    />
-  );
-
   return (
     <>
-      {/* Lobby phase: classic two-column layout. */}
       {!isPlaying ? (
+        // Lobby: the sidebar shows in the page (drawer is also wired
+        // via useProvideDrawerContent so the top-nav hamburger has it
+        // too — handy on small screens).
         <div className="im-table">
-          <aside className="im-table__sidebar">{sidebar}</aside>
+          <aside className="im-table__sidebar">{drawerContent}</aside>
           <main className="im-table__content">
             <div className="im-table__lobby">
               <h2>Waiting to start</h2>
@@ -101,36 +132,12 @@ export function TableScreen({ tableId, onLeave }: Props) {
           </main>
         </div>
       ) : (
-        // Playing phase: full-bleed game, sidebar lives behind a hamburger.
+        // Playing: full-bleed game canvas; chrome is in the platform
+        // top nav's hamburger drawer.
         <div className="im-table im-table--playing">
-          <button
-            className="im-table__drawer-toggle"
-            onClick={() => setDrawerOpen((v) => !v)}
-            title="Table controls"
-          >
-            ☰
-          </button>
           <main className="im-table__game-fullbleed">
             {user && <GameMount table={state} userId={user.id} />}
           </main>
-          {drawerOpen && (
-            <>
-              <div
-                className="im-table__drawer-backdrop"
-                onClick={() => setDrawerOpen(false)}
-              />
-              <aside className="im-table__drawer">
-                <button
-                  className="im-table__drawer-close"
-                  onClick={() => setDrawerOpen(false)}
-                  title="Close"
-                >
-                  ✕
-                </button>
-                {sidebar}
-              </aside>
-            </>
-          )}
         </div>
       )}
 
@@ -154,8 +161,7 @@ export function TableScreen({ tableId, onLeave }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar content — same content shown in lobby's column or the hamburger
-// drawer during play.
+// Sidebar content
 // ---------------------------------------------------------------------------
 
 type ClientSend = ReturnType<typeof useClient>["send"];
@@ -168,7 +174,8 @@ interface SidebarProps {
   mySeat: TableState["slots"][number] | null;
   send: ClientSend;
   onSaveClick(): void;
-  onLeave(): void;
+  onBack(): void;
+  onGiveUpSeat(): void;
   error: string | null;
 }
 
@@ -180,9 +187,16 @@ function SidebarContent({
   mySeat,
   send,
   onSaveClick,
-  onLeave,
+  onBack,
+  onGiveUpSeat,
   error,
 }: SidebarProps) {
+  const isPlaying = state.status === "playing";
+  const playableSet = useMemo(
+    () => new Set(state.playableSeatIndices),
+    [state.playableSeatIndices],
+  );
+
   return (
     <>
       <h3>{state.name}</h3>
@@ -195,14 +209,30 @@ function SidebarContent({
         {state.slots.map((slot) => {
           const occupied = slot.claimedBy !== null;
           const itsMe = slot.claimedBy?.id === myUserId;
+          const isPlayable = playableSet.has(slot.seatIndex);
+          const greyedOut = !isPlayable && !occupied;
           return (
-            <li key={slot.seatIndex}>
+            <li
+              key={slot.seatIndex}
+              className={greyedOut ? "is-disabled" : undefined}
+              title={
+                greyedOut
+                  ? "This seat wasn't in the game when it started — it can't be claimed mid-game."
+                  : undefined
+              }
+            >
               <span className="im-table__seat">
                 Seat {slot.seatIndex + 1}:{" "}
-                {occupied ? slot.claimedBy!.username : <em>open</em>}
+                {occupied ? (
+                  slot.claimedBy!.username
+                ) : greyedOut ? (
+                  <em>not in this game</em>
+                ) : (
+                  <em>open</em>
+                )}
               </span>
               <span className="im-table__seat-actions">
-                {!occupied && state.status === "lobby" && (
+                {!occupied && isPlayable && (
                   <button
                     onClick={() =>
                       send({
@@ -261,7 +291,7 @@ function SidebarContent({
         </button>
       )}
 
-      {isHost && state.status === "playing" && (
+      {isHost && isPlaying && (
         <button onClick={onSaveClick}>
           {state.currentSaveName
             ? `Save ("${state.currentSaveName}")`
@@ -275,7 +305,17 @@ function SidebarContent({
         </p>
       )}
 
-      <button onClick={onLeave}>Leave table</button>
+      <button onClick={onBack}>Back to tables</button>
+      <p className="im-table__hint">
+        Closes the tab? Your seat stays held — reconnect any time and you'll
+        land back in it.
+      </p>
+
+      {mySeat && isPlaying && (
+        <button className="im-table__giveup" onClick={onGiveUpSeat}>
+          Give up your seat
+        </button>
+      )}
 
       {isHost && (
         <button
@@ -284,7 +324,7 @@ function SidebarContent({
             if (!confirm(`Delete table "${state.name}"? This kicks everyone.`))
               return;
             send({ type: "DELETE_TABLE", tableId: asTableId(tableId) });
-            onLeave();
+            onBack();
           }}
         >
           Delete table
@@ -297,7 +337,7 @@ function SidebarContent({
 }
 
 // ---------------------------------------------------------------------------
-// Save dialog — offers overwrite vs new when the table already has a save.
+// Save dialog — overwrite vs new
 // ---------------------------------------------------------------------------
 
 interface SaveDialogProps {
@@ -318,13 +358,17 @@ function SaveDialog({ state, onClose, onSave }: SaveDialogProps) {
         {hasExisting ? (
           <>
             <p className="im-modal__hint">
-              This table was last saved as <strong>"{state.currentSaveName}"</strong>.
-              Overwrite it, or save under a new name?
+              This table was last saved as{" "}
+              <strong>"{state.currentSaveName}"</strong>. Overwrite it, or save
+              under a new name?
             </p>
             <div className="im-modal__row">
               <button
                 onClick={() =>
-                  onSave(state.currentSaveName ?? state.name, asSaveId(state.currentSaveId!))
+                  onSave(
+                    state.currentSaveName ?? state.name,
+                    asSaveId(state.currentSaveId!),
+                  )
                 }
               >
                 Overwrite "{state.currentSaveName}"

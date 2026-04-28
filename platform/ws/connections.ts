@@ -32,6 +32,12 @@ export class ConnectionRegistry {
     return this.countSockets(userId) > 0;
   }
 
+  /** Snapshot of every userId that currently has at least one open
+   *  socket. Order is insertion-order. */
+  getOnlineUsers(): UserId[] {
+    return [...this.byUser.keys()];
+  }
+
   sendToUser(userId: UserId, msg: ServerMessage): void {
     const set = this.byUser.get(userId);
     if (!set) return;

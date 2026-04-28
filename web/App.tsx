@@ -4,6 +4,10 @@ import {
   PlatformClientProvider,
   useClient,
 } from "./platform/PlatformClientContext";
+import {
+  TableDrawerProvider,
+  useTableDrawer,
+} from "./platform/TableDrawerContext";
 import { LoginScreen } from "./platform/screens/LoginScreen";
 import { SavesScreen } from "./platform/screens/SavesScreen";
 import { TableScreen } from "./platform/screens/TableScreen";
@@ -29,7 +33,9 @@ function Gate(): ReactNode {
   if (auth.status === "anon") return <LoginScreen />;
   return (
     <PlatformClientProvider>
-      <Shell />
+      <TableDrawerProvider>
+        <Shell />
+      </TableDrawerProvider>
     </PlatformClientProvider>
   );
 }
@@ -37,12 +43,28 @@ function Gate(): ReactNode {
 function Shell(): ReactNode {
   const auth = useAuth();
   const { status } = useClient();
+  const drawer = useTableDrawer();
   const [route, setRoute] = useState<Route>({ kind: "tables" });
+
+  const onTable = route.kind === "table";
+  const drawerHasContent = drawer.content !== null;
 
   return (
     <div className="im-shell">
       <header className="im-shell__nav">
-        <span className="im-shell__brand" onClick={() => setRoute({ kind: "tables" })}>
+        {onTable && drawerHasContent && (
+          <button
+            className="im-shell__hamburger"
+            onClick={drawer.toggle}
+            title="Table menu"
+          >
+            ☰
+          </button>
+        )}
+        <span
+          className="im-shell__brand"
+          onClick={() => setRoute({ kind: "tables" })}
+        >
           In My Pocket
         </span>
         <span className="im-shell__status">
@@ -53,6 +75,7 @@ function Shell(): ReactNode {
           <button onClick={() => void auth.logout()}>Log out</button>
         </span>
       </header>
+
       <main className="im-shell__content">
         {route.kind === "tables" && (
           <TablesScreen
@@ -73,6 +96,25 @@ function Shell(): ReactNode {
           />
         )}
       </main>
+
+      {drawer.isOpen && drawerHasContent && (
+        <>
+          <div
+            className="im-shell__drawer-backdrop"
+            onClick={drawer.close}
+          />
+          <aside className="im-shell__drawer">
+            <button
+              className="im-shell__drawer-close"
+              onClick={drawer.close}
+              title="Close"
+            >
+              ✕
+            </button>
+            {drawer.content}
+          </aside>
+        </>
+      )}
     </div>
   );
 }

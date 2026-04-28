@@ -168,6 +168,7 @@ export class TableManager {
       this.attach(live, opts.hostUserId);
     }
 
+    this.broadcastTablesList();
     return { ok: true, tableId };
   }
 
@@ -363,6 +364,7 @@ export class TableManager {
     for (const userId of t.attached) t.session.detachConnection(userId);
     this.tables.delete(tableId);
     tablesDb.deleteTable(this.db, tableId);
+    this.broadcastTablesList();
     return { ok: true };
   }
 
@@ -382,6 +384,7 @@ export class TableManager {
     tablesDb.updateTableStatus(this.db, tableId, "playing");
     t.lastActivityAt = Date.now();
     this.broadcastTableState(t);
+    this.broadcastTablesList();
     return { ok: true };
   }
 
@@ -521,6 +524,19 @@ export class TableManager {
     return this.snapshotState(t);
   }
 
+  /** Push a fresh, per-user-filtered TABLES_LIST to every connected
+   *  user. Called whenever the visible-tables set changes (create,
+   *  delete, status flip). */
+  broadcastTablesList(): void {
+    for (const userId of this.connections.getOnlineUsers()) {
+      const tables = this.listTables({ viewerUserId: userId });
+      this.connections.sendToUser(userId, {
+        type: "TABLES_LIST",
+        tables,
+      });
+    }
+  }
+
   listTables(opts: {
     viewerUserId: UserId;
     gameId?: GameId;
@@ -605,6 +621,10 @@ export class TableManager {
   }
 
   private snapshotState(t: LiveTable): TableState {
+    const desc = t.session.describe();
+    const playable =
+      desc.playableSeatIndices ??
+      Array.from({ length: t.slots.length }, (_, i) => i);
     return {
       id: t.id,
       gameId: t.gameId,
@@ -615,6 +635,7 @@ export class TableManager {
       slots: t.slots.map((s) => ({ ...s })),
       currentSaveId: t.currentSaveId,
       currentSaveName: t.currentSaveName,
+      playableSeatIndices: [...playable],
     };
   }
 
