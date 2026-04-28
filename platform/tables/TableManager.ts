@@ -139,11 +139,15 @@ export class TableManager {
     };
     this.tables.set(tableId, live);
 
-    // Host auto-claims seat 0.
+    // Host auto-claims seat 0 and is attached so they receive game
+    // messages (LOBBY_STATE, etc.) right away.
     const claim = session.claimSeat(opts.hostUserId, 0);
     if (claim.ok) {
       live.slots[0] = { ...live.slots[0]!, claimedBy: this.userSummary(opts.hostUserId) };
       tablesDb.setSlotClaim(this.db, tableId, 0, opts.hostUserId);
+    }
+    if (this.connections.isOnline(opts.hostUserId)) {
+      this.attach(live, opts.hostUserId);
     }
 
     return { ok: true, tableId };
