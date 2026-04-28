@@ -16,6 +16,12 @@ export class PlatformClient {
   private reconnectAttempt = 0;
   private wantOpen = false;
   private user: UserSummary | null = null;
+  // Cache of the most recent push-style messages so a subscriber that
+  // registers after the message arrived still sees the latest state.
+  // Without this, the WS open event (server sends TABLES_LIST in the
+  // same tick) races React's useEffect — the message is dispatched
+  // before any React component has called subscribe(), so it's lost.
+  private lastByType = new Map<ServerMessage["type"], ServerMessage>();
 
   connect(): void {
     if (this.wantOpen) return;
@@ -41,6 +47,16 @@ export class PlatformClient {
 
   subscribe(cb: (msg: ServerMessage) => void): () => void {
     this.listeners.add(cb);
+    // Replay the latest cached push messages so a late subscriber
+    // (e.g. a React component whose useEffect ran after the WS open
+    // event already delivered TABLES_LIST) doesn't miss them.
+    for (const msg of this.lastByType.values()) {
+      try {
+        cb(msg);
+      } catch {
+        /* swallow — same as live dispatch */
+      }
+    }
     return () => this.listeners.delete(cb);
   }
 
@@ -79,12 +95,23 @@ export class PlatformClient {
         return;
       }
       if (msg.type === "ME_OK") this.user = msg.user;
+      // Cache "latest" of the push types whose newest snapshot is
+      // always sufficient. Per-table TABLE_STATE is keyed by type
+      // alone here, but TableScreen filters by tableId so cross-talk
+      // doesn't matter — the screen only renders state for its own
+      // tableId.
+      if (msg.type === "TABLES_LIST" || msg.type === "GAMES_LIST") {
+        this.lastByType.set(msg.type, msg);
+      }
       for (const cb of this.listeners) cb(msg);
     });
 
     ws.addEventListener("close", () => {
       this.setStatus("closed");
       this.ws = null;
+      // Drop cached push messages — a fresh socket (potentially as a
+      // different user after logout/login) should start clean.
+      this.lastByType.clear();
       if (this.wantOpen) {
         this.reconnectAttempt += 1;
         const delay = Math.min(1000 * this.reconnectAttempt, 8000);

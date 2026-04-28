@@ -192,10 +192,21 @@ function SidebarContent({
   error,
 }: SidebarProps) {
   const isPlaying = state.status === "playing";
-  const playableSet = useMemo(
-    () => new Set(state.playableSeatIndices),
-    [state.playableSeatIndices],
-  );
+  // Fallback: if the server didn't provide playableSeatIndices (stale
+  // build, older table), treat every seat as playable in the lobby
+  // and only the occupied ones during play. Without this, no Claim
+  // button renders and the seat looks broken.
+  const playableSet = useMemo(() => {
+    if (state.playableSeatIndices && state.playableSeatIndices.length > 0) {
+      return new Set(state.playableSeatIndices);
+    }
+    if (state.status === "lobby") {
+      return new Set(state.slots.map((s) => s.seatIndex));
+    }
+    return new Set(
+      state.slots.filter((s) => s.claimedBy !== null).map((s) => s.seatIndex),
+    );
+  }, [state.playableSeatIndices, state.status, state.slots]);
 
   return (
     <>

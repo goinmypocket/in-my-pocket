@@ -265,9 +265,12 @@ export class TableManager {
     if (kind === "spectator") {
       if (!t.def.supportsSpectators)
         return { ok: false, reason: "spectators not allowed" };
-      // Releasing any prior seat the user held (handles re-join).
-      this.maybeReleaseSeats(t, userId);
-      t.spectators.add(userId);
+      // Spectator join is just "I'm looking at this table" — if the
+      // user already holds a seat (e.g. the host opening their own
+      // freshly-created table), keep it. Spectator status is only
+      // recorded for users who don't hold a seat.
+      const holdsSeat = t.slots.some((s) => s.claimedBy?.id === userId);
+      if (!holdsSeat) t.spectators.add(userId);
       this.attach(t, userId);
       this.broadcastTableState(t);
       return { ok: true };
@@ -312,7 +315,10 @@ export class TableManager {
         }
       }
     }
-    this.detach(t, userId);
+    // Don't detach: the user is releasing a seat / spectator role, but
+    // they're still on the table screen and want to see the update.
+    // The connection only goes away when their socket actually closes
+    // (handled by onUserDisconnected).
     if (changed) {
       t.lastActivityAt = Date.now();
       this.broadcastTableState(t);
@@ -405,16 +411,21 @@ export class TableManager {
   // ---------------------------------------------------------------------------
 
   /** A user just opened their first socket. Re-attach them to every table
-   *  where they currently hold a seat or are a spectator. */
+   *  where they currently hold a seat or are a spectator, and push them
+   *  a fresh TABLES_LIST so the lobby populates without waiting for the
+   *  client to ask. */
   onUserConnected(userId: UserId): void {
     for (const t of this.tables.values()) {
       const seated = t.slots.some((s) => s.claimedBy?.id === userId);
       const spectating = t.spectators.has(userId);
       if (seated || spectating) {
-        // Re-attach so the session can re-broadcast a fresh snapshot.
         this.attach(t, userId);
       }
     }
+    this.connections.sendToUser(userId, {
+      type: "TABLES_LIST",
+      tables: this.listTables({ viewerUserId: userId }),
+    });
   }
 
   /** A user just closed their last socket. Detach from every table. */
