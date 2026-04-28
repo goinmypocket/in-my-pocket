@@ -1,0 +1,3 @@
+[submodule "coke-and-iron"]
+	path = coke-and-iron
+	url = https://github.com/goinmypocket/coke-and-iron.git

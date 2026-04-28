@@ -1,0 +1,28 @@
+# In My Pocket — Fly.io app config.
+#
+# After `fly launch --no-deploy --copy-config` (or manual edit), set
+# `app` below to the name Fly assigned, then create the volume and
+# deploy. See docs/deploy.md.
+
+app = "in-my-pocket"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

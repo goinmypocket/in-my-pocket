@@ -1,0 +1,15 @@
+node_modules
+coke-and-iron/node_modules
+dist
+data
+.git
+.gitignore
+.env
+.env.*
+*.log
+.vscode
+.idea
+.DS_Store
+README.md
+docs
+tests
