@@ -130,8 +130,7 @@ function openWs(cookie: string): Promise<WsHandle> {
 describe("coke-and-iron via the platform", () => {
   it("registry registers the game", async () => {
     const reg = await buildRegistry();
-    expect(reg.size).toBe(1);
-    expect(Array.from(reg.values())[0]?.id).toBe("coke-and-iron");
+    expect(reg.has("coke-and-iron" as never)).toBe(true);
   });
 
   it("LIST_GAMES reports coke-and-iron with options schema", async () => {
@@ -141,12 +140,11 @@ describe("coke-and-iron via the platform", () => {
     ws.send({ type: "LIST_GAMES" });
     const games = await ws.waitFor((m) => m.type === "GAMES_LIST");
     if (games.type !== "GAMES_LIST") throw new Error("expected GAMES_LIST");
-    expect(games.games).toHaveLength(1);
-    const g = games.games[0]!;
-    expect(g.id).toBe("coke-and-iron");
-    expect(g.minPlayers).toBe(2);
-    expect(g.maxPlayers).toBe(4);
-    const keys = g.optionsSchema.map((f) => f.key).sort();
+    const g = games.games.find((x) => x.id === "coke-and-iron");
+    expect(g).toBeDefined();
+    expect(g!.minPlayers).toBe(2);
+    expect(g!.maxPlayers).toBe(4);
+    const keys = g!.optionsSchema.map((f) => f.key).sort();
     expect(keys).toEqual(["allowUndo", "autoEndTurn", "seed"]);
     await ws.close();
   });

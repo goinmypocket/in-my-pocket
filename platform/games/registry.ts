@@ -37,5 +37,15 @@ export async function buildRegistry(): Promise<GameRegistry> {
     console.warn("[in-my-pocket] coke-and-iron not installed; skipping", err);
   }
 
+  // Mockery — real-time, asymmetric-info trading game.
+  try {
+    const mod = (await import("mockery/definition")) as unknown as {
+      def: GameDefinition;
+    };
+    entries.push([mod.def.id, mod.def]);
+  } catch (err) {
+    console.warn("[in-my-pocket] mockery not installed; skipping", err);
+  }
+
   return new Map(entries);
 }

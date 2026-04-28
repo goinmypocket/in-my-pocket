@@ -29,6 +29,10 @@ const GAME_LOADERS: Record<string, () => Promise<{ default: ComponentType<GamePr
     const mod = await import("coke-and-iron/web");
     return { default: mod.default as unknown as ComponentType<GameProps> };
   },
+  "mockery": async () => {
+    const mod = await import("mockery/web");
+    return { default: mod.default as unknown as ComponentType<GameProps> };
+  },
 };
 
 export interface PlatformGameContext {
