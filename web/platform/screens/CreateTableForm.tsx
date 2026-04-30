@@ -13,6 +13,7 @@ export function CreateTableForm({ onCancel }: { onCancel(): void }) {
   const [gameId, setGameId] = useState<string>("");
   const [name, setName] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
+  const [allowSpectators, setAllowSpectators] = useState(true);
   const [options, setOptions] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
@@ -50,6 +51,10 @@ export function CreateTableForm({ onCancel }: { onCancel(): void }) {
       gameId: asGameId(gameId),
       name: name.trim() || "Untitled table",
       isPrivate,
+      // Only forward the spectator toggle when the game module supports
+      // spectators in the first place — otherwise the platform falls
+      // back to false anyway and the form control would be misleading.
+      ...(selectedGame?.supportsSpectators ? { allowSpectators } : {}),
       options,
     });
   }
@@ -94,6 +99,16 @@ export function CreateTableForm({ onCancel }: { onCancel(): void }) {
         />
         Private (only people you share the table with see it)
       </label>
+      {selectedGame?.supportsSpectators && (
+        <label className="im-create-form__check">
+          <input
+            type="checkbox"
+            checked={allowSpectators}
+            onChange={(e) => setAllowSpectators(e.target.checked)}
+          />
+          Allow spectators (let signed-in users watch this table)
+        </label>
+      )}
       {selectedGame &&
         selectedGame.optionsSchema.map((field) => (
           <OptionInput

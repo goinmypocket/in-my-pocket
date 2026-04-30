@@ -8,6 +8,7 @@ export interface InviteRow {
   readonly expiresAt: string | null;
   readonly maxUses: number;
   readonly usedCount: number;
+  readonly grantsAdmin: boolean;
   readonly revokedAt: string | null;
   readonly note: string | null;
 }
@@ -19,6 +20,7 @@ interface RawInviteRow {
   expires_at: string | null;
   max_uses: number;
   used_count: number;
+  grants_admin: number | null;
   revoked_at: string | null;
   note: string | null;
 }
@@ -31,6 +33,7 @@ function fromRow(r: RawInviteRow): InviteRow {
     expiresAt: r.expires_at,
     maxUses: r.max_uses,
     usedCount: r.used_count,
+    grantsAdmin: r.grants_admin === null ? false : r.grants_admin !== 0,
     revokedAt: r.revoked_at,
     note: r.note,
   };
@@ -43,19 +46,22 @@ export function insertInvite(
     createdBy?: UserId | null;
     expiresAt?: string | null;
     maxUses?: number;
+    grantsAdmin?: boolean;
     note?: string | null;
   },
 ): void {
   db.prepare(
     `INSERT INTO invite_codes
-       (code, created_by, created_at, expires_at, max_uses, used_count, note)
-     VALUES (?, ?, ?, ?, ?, 0, ?)`,
+       (code, created_by, created_at, expires_at, max_uses, used_count,
+        grants_admin, note)
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
   ).run(
     opts.code,
     opts.createdBy ?? null,
     new Date().toISOString(),
     opts.expiresAt ?? null,
     opts.maxUses ?? 1,
+    opts.grantsAdmin ? 1 : 0,
     opts.note ?? null,
   );
 }
@@ -99,7 +105,7 @@ export function redeemInvite(
   code: string,
   userId: UserId,
   ipAddress: string | null,
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true; grantsAdmin: boolean } | { ok: false; reason: string } {
   const tx = db.transaction(() => {
     const row = db
       .prepare(`SELECT * FROM invite_codes WHERE code = ?`)
@@ -129,7 +135,10 @@ export function redeemInvite(
       `INSERT INTO invite_redemptions (code, redeemed_by, redeemed_at, ip_address)
        VALUES (?, ?, ?, ?)`,
     ).run(code, userId, new Date().toISOString(), ipAddress);
-    return { ok: true as const };
+    return {
+      ok: true as const,
+      grantsAdmin: row.grants_admin === null ? false : row.grants_admin !== 0,
+    };
   });
   return tx();
 }

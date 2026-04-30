@@ -12,6 +12,12 @@ CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
+  -- Two-tier role model. Admins can mint invites (for either tier),
+  -- list users, and promote/demote others. Non-admins can play games
+  -- but cannot invite anyone. The flag is read from the DB on each
+  -- privileged request so a demotion takes effect immediately
+  -- (without re-issuing the JWT).
+  is_admin      INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL,
   last_seen_at  TEXT
 );
@@ -37,6 +43,15 @@ CREATE TABLE IF NOT EXISTS tables (
   status          TEXT NOT NULL,
   loaded_save_id  TEXT REFERENCES saves(id),
   options_json    TEXT NOT NULL DEFAULT '{}',
+  allow_spectators INTEGER NOT NULL DEFAULT 1,
+  -- Live state autosave: the table's GameSession.serialize() output,
+  -- rewritten after every state-mutating op (claim / release / kick /
+  -- start / GAME_MSG). Recovery on platform startup reads this back
+  -- via def.loadSession(...) and rebuilds the LiveTable. Null only
+  -- before the very first persist, which the create path runs
+  -- synchronously — so any row visible on disk has a usable blob.
+  live_save_blob  BLOB,
+  live_save_at    TEXT,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
@@ -57,6 +72,11 @@ CREATE TABLE IF NOT EXISTS invite_codes (
   expires_at     TEXT,
   max_uses       INTEGER NOT NULL DEFAULT 1,
   used_count     INTEGER NOT NULL DEFAULT 0,
+  -- When set, redeemers of this code are created with is_admin=1.
+  -- Lets an admin mint admin-tier invites without exposing a "make
+  -- admin" button on user pages (which would be one click away from
+  -- a privilege-escalation footgun).
+  grants_admin   INTEGER NOT NULL DEFAULT 0,
   revoked_at     TEXT,
   note           TEXT
 );

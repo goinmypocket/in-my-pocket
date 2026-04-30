@@ -39,6 +39,9 @@ export function dispatchMessage(
         name: msg.name,
         isPrivate: msg.isPrivate,
         options: msg.options,
+        ...(msg.allowSpectators !== undefined
+          ? { allowSpectators: msg.allowSpectators }
+          : {}),
       });
       if (!result.ok) return fail(result.reason);
       const state = tableManager.getTableState(result.tableId);

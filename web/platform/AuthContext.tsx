@@ -18,6 +18,7 @@ interface AuthValue {
   login(args: { username: string; password: string }): Promise<void>;
   signup(args: { username: string; password: string; inviteCode: string }): Promise<void>;
   logout(): Promise<void>;
+  deleteAccount(args: { password: string }): Promise<void>;
 }
 
 const Ctx = createContext<AuthValue | null>(null);
@@ -68,9 +69,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus("anon");
   }, []);
 
+  const deleteAccount = useCallback(
+    async (args: { password: string }) => {
+      await api.deleteAccount(args);
+      setUser(null);
+      setStatus("anon");
+    },
+    [],
+  );
+
   const value = useMemo<AuthValue>(
-    () => ({ status, user, login, signup, logout }),
-    [status, user, login, signup, logout],
+    () => ({ status, user, login, signup, logout, deleteAccount }),
+    [status, user, login, signup, logout, deleteAccount],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -269,22 +269,25 @@ function SidebarContent({
                     Release
                   </button>
                 )}
-                {!itsMe &&
-                  occupied &&
-                  isHost &&
-                  state.status === "lobby" && (
-                    <button
-                      onClick={() =>
-                        send({
-                          type: "KICK_USER",
-                          tableId: asTableId(tableId),
-                          seatIndex: slot.seatIndex,
-                        })
-                      }
-                    >
-                      Kick
-                    </button>
-                  )}
+                {!itsMe && occupied && isHost && (
+                  <button
+                    onClick={() => {
+                      const name = slot.claimedBy?.username ?? "this player";
+                      const prompt =
+                        state.status === "playing"
+                          ? `Kick ${name} mid-game? Their seat will be empty until someone reclaims it; the game keeps running.`
+                          : `Kick ${name} from this table?`;
+                      if (!confirm(prompt)) return;
+                      send({
+                        type: "KICK_USER",
+                        tableId: asTableId(tableId),
+                        seatIndex: slot.seatIndex,
+                      });
+                    }}
+                  >
+                    Kick
+                  </button>
+                )}
               </span>
             </li>
           );

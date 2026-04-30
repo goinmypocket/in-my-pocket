@@ -30,6 +30,31 @@ export function openDb(dataDir: string): Db {
       column: "options_json",
       ddl: "ALTER TABLE tables ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'",
     },
+    {
+      table: "tables",
+      column: "allow_spectators",
+      ddl: "ALTER TABLE tables ADD COLUMN allow_spectators INTEGER NOT NULL DEFAULT 1",
+    },
+    {
+      table: "tables",
+      column: "live_save_blob",
+      ddl: "ALTER TABLE tables ADD COLUMN live_save_blob BLOB",
+    },
+    {
+      table: "tables",
+      column: "live_save_at",
+      ddl: "ALTER TABLE tables ADD COLUMN live_save_at TEXT",
+    },
+    {
+      table: "users",
+      column: "is_admin",
+      ddl: "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+    },
+    {
+      table: "invite_codes",
+      column: "grants_admin",
+      ddl: "ALTER TABLE invite_codes ADD COLUMN grants_admin INTEGER NOT NULL DEFAULT 0",
+    },
   ];
   for (const m of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${m.table})`).all() as {

@@ -14,6 +14,7 @@ export interface TableRow {
   readonly status: TableStatus;
   readonly loadedSaveId: SaveId | null;
   readonly options: Record<string, unknown>;
+  readonly allowSpectators: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -28,6 +29,7 @@ interface RawTableRow {
   status: TableStatus;
   loaded_save_id: string | null;
   options_json: string;
+  allow_spectators: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +54,9 @@ function fromTableRow(r: RawTableRow): TableRow {
     status: r.status,
     loadedSaveId: r.loaded_save_id ? asSaveId(r.loaded_save_id) : null,
     options,
+    // Default to allowed if the column was added by an older migration
+    // and the existing row didn't set it.
+    allowSpectators: r.allow_spectators === null ? true : r.allow_spectators !== 0,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -89,8 +94,8 @@ export function insertTable(db: Db, t: TableRow): void {
   db.prepare(
     `INSERT INTO tables
        (id, game_id, host_user_id, name, is_private, join_code, status,
-        loaded_save_id, options_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        loaded_save_id, options_json, allow_spectators, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     t.id,
     t.gameId,
@@ -101,6 +106,7 @@ export function insertTable(db: Db, t: TableRow): void {
     t.status,
     t.loadedSaveId,
     JSON.stringify(t.options),
+    t.allowSpectators ? 1 : 0,
     t.createdAt,
     t.updatedAt,
   );
@@ -173,4 +179,28 @@ export function setSlotClaim(
         SET claimed_by_user_id = ?
       WHERE table_id = ? AND seat_index = ?`,
   ).run(userId, tableId, seatIndex);
+}
+
+/** Overwrite the table's live-save blob with the latest serialized
+ *  GameSession bytes. Called by TableManager after every state-
+ *  mutating op so a crash recovery on the next platform start sees a
+ *  current snapshot. The single-row overwrite + WAL means the I/O is
+ *  small (~one append to the WAL) and atomic. */
+export function setLiveSaveBlob(
+  db: Db,
+  tableId: TableId,
+  bytes: Buffer,
+): void {
+  db.prepare(
+    `UPDATE tables
+        SET live_save_blob = ?, live_save_at = ?, updated_at = ?
+      WHERE id = ?`,
+  ).run(bytes, new Date().toISOString(), new Date().toISOString(), tableId);
+}
+
+export function getLiveSaveBlob(db: Db, tableId: TableId): Buffer | null {
+  const row = db
+    .prepare(`SELECT live_save_blob FROM tables WHERE id = ?`)
+    .get(tableId) as { live_save_blob: Buffer | null } | undefined;
+  return row?.live_save_blob ?? null;
 }

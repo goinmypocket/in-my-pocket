@@ -52,6 +52,11 @@ interface LiveTable {
   isPrivate: boolean;
   status: "lobby" | "playing" | "finished";
   options: Record<string, unknown>;
+  /** Whether new spectators can join this specific table. The host
+   *  toggles this at create-time. False is honored even when the game
+   *  module declares supportsSpectators=true (e.g. "no peekers"
+   *  tournaments). */
+  allowSpectators: boolean;
   slots: TableSlot[];
   spectators: Set<UserId>;
   attached: Set<UserId>;
@@ -81,6 +86,9 @@ export class TableManager {
     gameId: GameId;
     name: string;
     isPrivate: boolean;
+    /** Per-table host preference. Defaults to the game module's
+     *  declared capability when the host doesn't pin a value. */
+    allowSpectators?: boolean;
     options: Record<string, unknown>;
   }): { ok: true; tableId: TableId } | { ok: false; reason: string } {
     const def = this.registry.get(opts.gameId);
@@ -108,6 +116,13 @@ export class TableManager {
       });
     }
 
+    // Resolve the per-table spectator gate: a host can opt out for
+    // tournament tables even when the game itself supports them. When
+    // the host doesn't specify, fall back to the game's capability.
+    const allowSpectators = opts.allowSpectators === undefined
+      ? def.supportsSpectators
+      : opts.allowSpectators && def.supportsSpectators;
+
     const now = new Date().toISOString();
     this.db.transaction(() => {
       tablesDb.insertTable(this.db, {
@@ -120,6 +135,7 @@ export class TableManager {
         status: "lobby",
         loadedSaveId: null,
         options: effectiveOptions,
+        allowSpectators,
         createdAt: now,
         updatedAt: now,
       });
@@ -144,6 +160,7 @@ export class TableManager {
       isPrivate: opts.isPrivate,
       status: "lobby",
       options: effectiveOptions,
+      allowSpectators,
       slots,
       spectators: new Set(),
       attached: new Set(),
@@ -168,6 +185,9 @@ export class TableManager {
       this.attach(live, opts.hostUserId);
     }
 
+    // Capture the initial session state immediately so a crash before
+    // the first move still leaves a recoverable row on disk.
+    this.persistLiveBlob(live);
     this.broadcastTablesList();
     return { ok: true, tableId };
   }
@@ -215,6 +235,7 @@ export class TableManager {
         status: "lobby",
         loadedSaveId: opts.saveId,
         options: {},
+        allowSpectators: def.supportsSpectators,
         createdAt: now,
         updatedAt: now,
       });
@@ -229,7 +250,7 @@ export class TableManager {
       }
     })();
 
-    this.tables.set(tableId, {
+    const live: LiveTable = {
       id: tableId,
       gameId: row.gameId,
       def,
@@ -239,13 +260,16 @@ export class TableManager {
       isPrivate: opts.isPrivate,
       status: "lobby",
       options: {},
+      allowSpectators: def.supportsSpectators,
       slots,
       spectators: new Set(),
       attached: new Set(),
       lastActivityAt: Date.now(),
       currentSaveId: opts.saveId,
       currentSaveName: row.name,
-    });
+    };
+    this.tables.set(tableId, live);
+    this.persistLiveBlob(live);
     return { ok: true, tableId };
   }
 
@@ -265,6 +289,8 @@ export class TableManager {
     if (kind === "spectator") {
       if (!t.def.supportsSpectators)
         return { ok: false, reason: "spectators not allowed" };
+      if (!t.allowSpectators)
+        return { ok: false, reason: "host disabled spectators for this table" };
       // Spectator join is just "I'm looking at this table" — if the
       // user already holds a seat (e.g. the host opening their own
       // freshly-created table), keep it. Spectator status is only
@@ -296,6 +322,7 @@ export class TableManager {
     tablesDb.setSlotClaim(this.db, tableId, seatIndex, userId);
     this.attach(t, userId);
     t.lastActivityAt = Date.now();
+    this.persistLiveBlob(t);
     this.broadcastTableState(t);
     return { ok: true };
   }
@@ -321,6 +348,7 @@ export class TableManager {
     // (handled by onUserDisconnected).
     if (changed) {
       t.lastActivityAt = Date.now();
+      this.persistLiveBlob(t);
       this.broadcastTableState(t);
     }
     return { ok: true };
@@ -348,6 +376,7 @@ export class TableManager {
       reason: "kicked",
     });
     t.lastActivityAt = Date.now();
+    this.persistLiveBlob(t);
     this.broadcastTableState(t);
     return { ok: true };
   }
@@ -389,6 +418,7 @@ export class TableManager {
     t.status = "playing";
     tablesDb.updateTableStatus(this.db, tableId, "playing");
     t.lastActivityAt = Date.now();
+    this.persistLiveBlob(t);
     this.broadcastTableState(t);
     this.broadcastTablesList();
     return { ok: true };
@@ -404,6 +434,12 @@ export class TableManager {
     if (!t.attached.has(userId)) return;
     t.session.handleGameMessage(userId, payload);
     t.lastActivityAt = Date.now();
+    // Persist after EVERY routed message: read-only requests
+    // (REQUEST_SNAPSHOT, SET_SPECTATOR_VIEW) re-serialize unchanged
+    // bytes, which is harmless. The alternative (a "did state
+    // change" signal) would be a GameSession API expansion; for now
+    // overwriting the blob unconditionally keeps the contract small.
+    this.persistLiveBlob(t);
   }
 
   // ---------------------------------------------------------------------------
@@ -631,6 +667,24 @@ export class TableManager {
     }
   }
 
+  /** Snapshot the table's session and overwrite the persisted blob.
+   *  Called after every state-mutating op so a crash recovery on the
+   *  next platform start sees the latest authoritative state.
+   *  Failures are logged but never thrown — losing one snapshot is
+   *  better than dropping the in-memory game. */
+  private persistLiveBlob(t: LiveTable): void {
+    try {
+      const blob = t.session.serialize();
+      const bytes = Buffer.from(JSON.stringify(blob), "utf8");
+      tablesDb.setLiveSaveBlob(this.db, t.id, bytes);
+    } catch (err) {
+      console.error(
+        `[in-my-pocket] failed to persist live save for ${t.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   private snapshotState(t: LiveTable): TableState {
     const desc = t.session.describe();
     const playable =
@@ -643,6 +697,7 @@ export class TableManager {
       hostUserId: t.hostUserId,
       status: t.status,
       options: t.options,
+      allowSpectators: t.allowSpectators,
       slots: t.slots.map((s) => ({ ...s })),
       currentSaveId: t.currentSaveId,
       currentSaveName: t.currentSaveName,
@@ -664,5 +719,172 @@ export class TableManager {
   private userSummary(userId: UserId): UserSummary {
     const u = usersDb.findUserById(this.db, userId);
     return { id: userId, username: u?.username ?? "(unknown)" };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Crash recovery
+  // ---------------------------------------------------------------------------
+
+  /** Rehydrate every persisted table into memory. Called by the
+   *  platform server during startup, after the game registry is built
+   *  but before any sockets accept traffic. For each non-archived
+   *  table on disk we:
+   *
+   *    1. parse the live-save blob and call def.loadSession() to get
+   *       a fresh GameSession populated with the saved intent log,
+   *       seat identities, etc.;
+   *    2. re-claim every seat row that names a userId, so the session
+   *       sees the same slotToUser map it had pre-crash;
+   *    3. if the table was in 'playing' status, call session.startGame()
+   *       so the engine replays the intent log and we resume right
+   *       where the host left off.
+   *
+   *  Tables we can't rebuild (game module no longer registered, blob
+   *  corrupt, replay diverged) are logged and left in the DB — the
+   *  operator can investigate without losing the row. */
+  recoverFromDisk(): { recovered: number; skipped: number; failed: number } {
+    let recovered = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    const rows = tablesDb.listAllTables(this.db);
+    for (const row of rows) {
+      if (row.status === "finished" || row.status === "archived") {
+        skipped++;
+        continue;
+      }
+      const def = this.registry.get(row.gameId);
+      if (!def) {
+        console.warn(
+          `[in-my-pocket] table ${row.id}: game '${row.gameId}' not registered, skipping`,
+        );
+        skipped++;
+        continue;
+      }
+
+      const blob = tablesDb.getLiveSaveBlob(this.db, row.id);
+      let session: GameSession;
+      if (blob) {
+        try {
+          const parsed = JSON.parse(blob.toString("utf8"));
+          session = def.loadSession(parsed, {
+            tableId: row.id,
+            hostUserId: row.hostUserId,
+            options: row.options,
+          });
+        } catch (err) {
+          console.error(
+            `[in-my-pocket] table ${row.id}: corrupt live save, skipping:`,
+            err instanceof Error ? err.message : err,
+          );
+          failed++;
+          continue;
+        }
+      } else {
+        // Pre-persistence row (legacy DB) — recreate a fresh session
+        // and treat it as a never-played lobby table.
+        session = def.createSession({
+          tableId: row.id,
+          hostUserId: row.hostUserId,
+          options: row.options,
+        });
+      }
+
+      // Whether the loaded session is still in lobby. Snapshot-style
+      // persistence (e.g. Mockery) restores a fully past-lobby session
+      // inside loadSession; replay-style persistence (e.g. coke-and-iron)
+      // returns a lobby session and expects us to drive claimSeat /
+      // startGame to replay the intent log. We branch on that.
+      const sessionStatus = session.describe().status;
+      const needsLobbyReplay = sessionStatus === "lobby";
+
+      // Read persisted slot claims and re-establish them on the
+      // session. The session's lobby flow accepts a userId per seat
+      // and fills in identity from any value the saved blob already
+      // stashed (CokeAndIronSession does this via slotIdentities).
+      const persistedSlots = tablesDb.getSlots(this.db, row.id);
+      const slots: TableSlot[] = [];
+      for (let i = 0; i < def.maxPlayers; i++) {
+        const persisted = persistedSlots.find((s) => s.seatIndex === i);
+        slots.push({
+          seatIndex: i,
+          kind: "player",
+          claimedBy: null,
+        });
+        if (persisted?.claimedByUserId) {
+          const summary = this.userSummary(persisted.claimedByUserId);
+          if (needsLobbyReplay) {
+            const claim = session.claimSeat(persisted.claimedByUserId, i, {
+              displayName: summary.username,
+            });
+            if (claim.ok) {
+              slots[i] = { seatIndex: i, kind: "player", claimedBy: summary };
+            } else {
+              // Session refused the seat — most likely the saved blob
+              // already had a different user there. Leave the slot empty
+              // and let the next reclaim sort it out.
+              console.warn(
+                `[in-my-pocket] table ${row.id} seat ${i}: ${claim.reason}`,
+              );
+            }
+          } else {
+            // Snapshot-restored session already has its seat map; just
+            // mirror it into the live-table slots[] so platform chrome
+            // (table list, lobby UI) stays in sync.
+            slots[i] = { seatIndex: i, kind: "player", claimedBy: summary };
+          }
+        }
+      }
+
+      // Auto-resume games that were mid-play at crash time. Only call
+      // startGame if the session is still in lobby (replay-style); a
+      // snapshot-restored session is already past lobby and would
+      // reject the call.
+      let resolvedStatus = row.status;
+      if (row.status === "playing" && needsLobbyReplay) {
+        const start = session.startGame(row.hostUserId);
+        if (!start.ok) {
+          console.warn(
+            `[in-my-pocket] table ${row.id}: could not resume play (${start.reason}), reverting to lobby`,
+          );
+          resolvedStatus = "lobby";
+          tablesDb.updateTableStatus(this.db, row.id, "lobby");
+        }
+      } else if (!needsLobbyReplay && row.status === "lobby") {
+        // Stale row.status (e.g. an older recovery bug reverted the row
+        // to lobby even though the session blob is past-lobby). The
+        // session is the source of truth — promote the row back to
+        // playing.
+        resolvedStatus = "playing";
+        tablesDb.updateTableStatus(this.db, row.id, "playing");
+      }
+
+      this.tables.set(row.id, {
+        id: row.id,
+        gameId: row.gameId,
+        def,
+        session,
+        hostUserId: row.hostUserId,
+        name: row.name,
+        isPrivate: row.isPrivate,
+        status: resolvedStatus,
+        options: row.options,
+        allowSpectators: row.allowSpectators,
+        slots,
+        spectators: new Set(),
+        attached: new Set(),
+        lastActivityAt: Date.now(),
+        currentSaveId: null,
+        currentSaveName: null,
+      });
+      recovered++;
+    }
+
+    if (recovered + skipped + failed > 0) {
+      console.log(
+        `[in-my-pocket] recovered ${recovered} table(s); skipped ${skipped}; failed ${failed}`,
+      );
+    }
+    return { recovered, skipped, failed };
   }
 }

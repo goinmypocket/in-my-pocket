@@ -25,7 +25,19 @@ export type ClientMessage =
   // --- Games ---
   | { type: "LIST_GAMES" }
   // --- Tables ---
-  | { type: "CREATE_TABLE"; gameId: GameId; name: string; isPrivate: boolean; options: Record<string, unknown> }
+  | {
+      type: "CREATE_TABLE";
+      gameId: GameId;
+      name: string;
+      isPrivate: boolean;
+      /** Host-controlled per-table toggle. Defaults to the game's
+       *  static `supportsSpectators`; the host can opt out for
+       *  individual tables (e.g. tournaments) without disabling the
+       *  feature game-wide. Ignored when the game itself doesn't
+       *  support spectators. */
+      allowSpectators?: boolean;
+      options: Record<string, unknown>;
+    }
   | { type: "LIST_TABLES"; filter?: TableFilter }
   | { type: "JOIN_TABLE"; tableId: TableId; seatIndex: number; kind: "player" | "spectator" }
   | { type: "LEAVE_TABLE"; tableId: TableId }
@@ -76,6 +88,11 @@ export type ServerMessage =
 export interface UserSummary {
   readonly id: UserId;
   readonly username: string;
+  /** True for users with platform-wide admin role: can mint invites,
+   *  list users, promote/demote others. Read from the DB on every
+   *  privileged request so a CLI demote takes effect immediately.
+   *  Optional for forwards-compat with older deploys. */
+  readonly isAdmin?: boolean;
 }
 
 export interface TableFilter {
@@ -104,6 +121,10 @@ export interface TableState {
   readonly hostUserId: UserId;
   readonly status: "lobby" | "playing" | "finished";
   readonly options: Record<string, unknown>;
+  /** Whether new spectators can join this table. Set at create-time by
+   *  the host; orthogonal to the game module's `supportsSpectators`
+   *  capability flag (which is a hard prerequisite). */
+  readonly allowSpectators: boolean;
   readonly slots: readonly TableSlot[];
   /** The most recent save this table is associated with (loaded from
    *  or saved to). The host UI uses this to offer overwrite vs new

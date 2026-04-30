@@ -49,6 +49,38 @@ describe("invite codes", () => {
     expect(formatForDisplay("XQDP7M3RK2NV9TBA")).toBe("XQDP-7M3R-K2NV-9TBA");
   });
 
+  it("multi-use code accepts multiple distinct users up to max_uses", async () => {
+    await withDb(async (db) => {
+      const code = generateInviteCode();
+      invites.insertInvite(db, { code, maxUses: 5 });
+      const pwHash = await hashPassword("pw");
+      // Five distinct users redeem successfully; the sixth is rejected.
+      for (let i = 0; i < 5; i++) {
+        const userId = asUserId(`u${i}`);
+        users.createUser(db, {
+          id: userId,
+          username: `user${i}`,
+          passwordHash: pwHash,
+        });
+        const r = invites.redeemInvite(db, code, userId, null);
+        expect(r.ok, `redemption #${i + 1} should succeed`).toBe(true);
+      }
+      const overflow = asUserId("u5");
+      users.createUser(db, {
+        id: overflow,
+        username: "user5",
+        passwordHash: pwHash,
+      });
+      const r6 = invites.redeemInvite(db, code, overflow, null);
+      expect(r6.ok).toBe(false);
+
+      // The bookkeeping reads correctly back from the DB.
+      const row = invites.findInviteByCode(db, code);
+      expect(row?.usedCount).toBe(5);
+      expect(row?.maxUses).toBe(5);
+    });
+  });
+
   it("redeem rejects unknown / revoked / expired / exhausted codes", async () => {
     await withDb(async (db) => {
       const code = generateInviteCode();

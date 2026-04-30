@@ -57,6 +57,11 @@ export async function startPlatform(opts: ServerOpts): Promise<RunningPlatform> 
 
   const connections = new ConnectionRegistry();
   const tableManager = new TableManager(db, registry, connections);
+  // Pull every persisted table back into memory before sockets open.
+  // Crash-recovered tables that were mid-play resume in 'playing'
+  // status with their seat ownership intact; users land back on the
+  // table and just receive a fresh SNAPSHOT on reconnect.
+  tableManager.recoverFromDisk();
 
   const http = createServer((req, res) => {
     void handleHttp(req, res, {

@@ -24,12 +24,17 @@ submodules under this repo; today there's only one (`coke-and-iron/`).
    `fly volume extend`.)
 4. Deploy:
    ```
-   fly deploy --local-only
+   fly deploy
    ```
-   `--local-only` builds the Docker image on your laptop, where the
-   submodule is already populated. The Fly remote builder doesn't
-   know how to initialise submodules from a private repo without
-   extra credential setup, so building locally is simpler.
+   Fly's remote builder receives the tarball of your working tree
+   (with `.dockerignore` applied) and runs the Docker build there.
+   The submodule's *files* are included because the directory is
+   populated locally — Fly doesn't clone anything, so the
+   "submodule needs a credential" issue never comes up.
+
+   `--local-only` would force the build to run on your laptop with
+   Docker Desktop. Avoid it unless you've installed Docker locally
+   and have a reason to build there.
 
 The first deploy creates the SQLite database at `/data/platform.db`
 and writes a fresh JWT signing key to `/data/jwt.secret`. Both survive
@@ -51,13 +56,16 @@ Copy the printed code; you'll need it on the signup screen at
 
 ## Day-to-day dev loop
 
-Local dev hasn't changed:
-
 ```
 $env:DATA_DIR = "./data"
-npm run server          # platform on http://localhost:8787
-npm run dev             # vite on http://localhost:5173
+npm run dev             # starts both: API on :8787 (tsx watch) + vite on :5173
 ```
+
+`npm run dev` runs the platform server and the vite dev server side-by-side
+via `concurrently`. The server reloads on changes (`tsx watch`); vite has its
+own HMR. Stopping with Ctrl-C kills both. If you only want one of them
+(e.g. attaching a debugger to the server), use `npm run dev:server` and
+`npm run dev:vite` independently.
 
 When you change game code:
 
@@ -67,11 +75,11 @@ When you change game code:
 3. `cd ..`
 4. `git add coke-and-iron && git commit -m "bump coke-and-iron"` —
    this advances the submodule pointer in the platform repo. Without
-   this commit, `fly deploy` keeps using the old game commit.
-5. `fly deploy --local-only`
+   this commit your local working tree still has the new code, but
+   the platform repo's recorded SHA is stale.
+5. `fly deploy`
 
-When you change platform code: just `fly deploy --local-only` after
-committing.
+When you change platform code: just `fly deploy` after committing.
 
 ## Backups
 

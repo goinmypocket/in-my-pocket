@@ -297,4 +297,99 @@ describe("coke-and-iron via the platform", () => {
     await aliceWs.close();
     await carolWs.close();
   });
+
+  it("crash recovery: started game survives platform restart with state intact", async () => {
+    // Mint invites for two fresh users dedicated to this test so we
+    // don't collide with the other tests' usernames.
+    const db = openDb(dataDir);
+    const codeA = generateInviteCode();
+    const codeB = generateInviteCode();
+    invitesDb.insertInvite(db, { code: codeA, maxUses: 1 });
+    invitesDb.insertInvite(db, { code: codeB, maxUses: 1 });
+    db.close();
+
+    const alice = await signup("rec-alice", codeA);
+    const bob = await signup("rec-bob", codeB);
+    const aliceWs = await openWs(alice.cookie);
+    const bobWs = await openWs(bob.cookie);
+    await aliceWs.waitFor((m) => m.type === "ME_OK");
+    await bobWs.waitFor((m) => m.type === "ME_OK");
+
+    aliceWs.send({
+      type: "CREATE_TABLE",
+      gameId: "coke-and-iron" as never,
+      name: "Recovery test",
+      isPrivate: false,
+      options: { seed: 42, autoEndTurn: false, allowUndo: true },
+    });
+    const created = await aliceWs.waitFor((m) => m.type === "TABLE_STATE");
+    if (created.type !== "TABLE_STATE") throw new Error("expected TABLE_STATE");
+    const tableId = created.table.id;
+
+    bobWs.send({ type: "JOIN_TABLE", tableId, seatIndex: 1, kind: "player" });
+    await bobWs.waitFor((m) => m.type === "TABLE_STATE");
+
+    aliceWs.msgs.length = 0;
+    bobWs.msgs.length = 0;
+    aliceWs.send({ type: "START_GAME", tableId });
+
+    // Capture a baseline snapshot from Alice (her view, including her
+    // own hand) so we can compare it to the recovered view later.
+    const preCrashSnap = await aliceWs.waitFor(
+      (m) =>
+        m.type === "GAME_MSG_OUT" &&
+        (m.payload as { type?: string }).type === "SNAPSHOT",
+    );
+    if (preCrashSnap.type !== "GAME_MSG_OUT") throw new Error("snap");
+    const preCrashView = JSON.stringify(
+      (preCrashSnap.payload as { playing: { view: unknown } }).playing.view,
+    );
+
+    // Tear the platform down hard to simulate a crash. The DB closes
+    // cleanly because we go through server.close(), but no in-memory
+    // sessions survive.
+    await aliceWs.close();
+    await bobWs.close();
+    await server.close();
+
+    // Bring the platform back up against the same data dir. The
+    // recoverFromDisk() call in startPlatform should rehydrate the
+    // table, restore both seat claims, and replay the intent log.
+    server = await startPlatform({ port: 0, dataDir });
+
+    // Same users reconnect; the platform sees them in the recovered
+    // table's slot map and pushes a SNAPSHOT on attach.
+    const aliceWs2 = await openWs(alice.cookie);
+    const bobWs2 = await openWs(bob.cookie);
+    await aliceWs2.waitFor((m) => m.type === "ME_OK");
+
+    // First piece of evidence: TABLES_LIST arrives on reconnect and
+    // includes our recovered table in 'playing' status with both seats
+    // still claimed.
+    const tablesList = await aliceWs2.waitFor(
+      (m) => m.type === "TABLES_LIST",
+    );
+    if (tablesList.type !== "TABLES_LIST") throw new Error("tables list");
+    const recovered = tablesList.tables.find((t) => t.id === tableId);
+    expect(recovered).toBeDefined();
+    expect(recovered!.status).toBe("playing");
+    expect(recovered!.playerCount).toBe(2);
+
+    // Second piece of evidence: the per-recipient SNAPSHOT pushed on
+    // attach matches Alice's pre-crash view byte-for-byte. Same hand,
+    // same projected board, same intent log replayed deterministically.
+    const aliceSnap2 = await aliceWs2.waitFor(
+      (m) =>
+        m.type === "GAME_MSG_OUT" &&
+        (m.payload as { type?: string }).type === "SNAPSHOT",
+    );
+    if (aliceSnap2.type !== "GAME_MSG_OUT") throw new Error("snap");
+    const postCrashView = JSON.stringify(
+      (aliceSnap2.payload as { playing: { view: unknown } }).playing.view,
+    );
+    expect(postCrashView).toBe(preCrashView);
+
+    await aliceWs2.close();
+    await bobWs2.close();
+  });
 });

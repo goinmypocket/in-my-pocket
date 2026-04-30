@@ -143,9 +143,9 @@ describe("mockery via the platform", () => {
     expect(def.maxPlayers).toBe(8);
     expect(def.supportsSpectators).toBe(true);
     const keys = def.optionsSchema.map((f) => f.key);
-    expect(keys).toContain("eventMode");
-    expect(keys).toContain("codeMode");
-    expect(keys).toContain("identityReveal");
+    expect(keys).toContain("informedSeats");
+    expect(keys).toContain("uninformedSeats");
+    expect(keys).toContain("seed");
   });
 
   it("LIST_GAMES includes mockery alongside coke-and-iron", async () => {
@@ -290,6 +290,74 @@ describe("mockery via the platform", () => {
 
     await a.close();
     await b.close();
+  });
+
+  it("crash recovery: a started mockery table survives platform restart", async () => {
+    const alice = await signup(`mk-rec-host-${Date.now()}`);
+    const bob = await signup(`mk-rec-bob-${Date.now()}`);
+    const a = await openWs(alice.cookie);
+    const b = await openWs(bob.cookie);
+    await a.waitFor((m) => m.type === "ME_OK");
+    await b.waitFor((m) => m.type === "ME_OK");
+
+    a.send({
+      type: "CREATE_TABLE",
+      gameId: "mockery" as never,
+      name: "Recovery mockery",
+      isPrivate: false,
+      options: {
+        informedSeats: 2, uninformedSeats: 0, publicSlots: 0,
+        copiesPerValue: 4, cardValuesCsv: "1,2,9,10",
+        eventMode: "manual", eventIntervalMin: 60, eventIntervalMax: 60,
+        endGameGraceSec: 0, codeMode: "alpha", enforceCaseByRole: false,
+        identityReveal: "all", seed: 42,
+      },
+    });
+    const created = await a.waitFor((m) => m.type === "TABLE_STATE");
+    if (created.type !== "TABLE_STATE") throw new Error("expected TABLE_STATE");
+    const tableId = created.table.id;
+
+    b.send({ type: "JOIN_TABLE", tableId, seatIndex: 1, kind: "player" });
+    await b.waitFor((m) => m.type === "TABLE_STATE");
+
+    a.send({ type: "START_GAME", tableId });
+    // Wait for the post-start snapshot so we know the session is in setup.
+    await a.waitFor(gameMsgOut(
+      (p) => p["type"] === "STATE_SNAPSHOT"
+        && (p["snap"] as { status: string } | undefined)?.status === "setup",
+    ));
+
+    await a.close();
+    await b.close();
+    await server.close();
+
+    // Restart the platform — recoverFromDisk should rehydrate the
+    // already-past-lobby session WITHOUT reverting it to lobby. The
+    // recovered table must come back in 'playing' status.
+    server = await startPlatform({ port: 0, dataDir });
+
+    const a2 = await openWs(alice.cookie);
+    await a2.waitFor((m) => m.type === "ME_OK");
+    const list = await a2.waitFor((m) => m.type === "TABLES_LIST");
+    if (list.type !== "TABLES_LIST") throw new Error("expected TABLES_LIST");
+    const found = list.tables.find((t) => t.id === tableId);
+    expect(found).toBeDefined();
+    expect(found!.status).toBe("playing");
+    expect(found!.playerCount).toBe(2);
+
+    // REQUEST_SNAPSHOT round-trip: the lazy-mounted UI sends this on
+    // subscribe to recover from missing the broadcast. The session
+    // should reply with a STATE_SNAPSHOT in setup status (engine
+    // state restored from the saved blob).
+    a2.send({ type: "JOIN_TABLE", tableId, seatIndex: -1, kind: "spectator" });
+    a2.msgs.length = 0;
+    a2.send({ type: "GAME_MSG", tableId, payload: { type: "REQUEST_SNAPSHOT" } });
+    const snap = await a2.waitFor(gameMsgOut((p) => p["type"] === "STATE_SNAPSHOT"));
+    if (snap.type !== "GAME_MSG_OUT") throw new Error("expected snapshot");
+    const snapBody = (snap.payload as { snap: { status: string } }).snap;
+    expect(snapBody.status).toBe("setup");
+
+    await a2.close();
   });
 
   it("LIBRARY_LIST/SAVE/DELETE round-trip via WS", async () => {
