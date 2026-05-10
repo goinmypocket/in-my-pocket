@@ -56,20 +56,33 @@ export function SavesScreen({ onBack, onOpenTable }: Props) {
         <p>You haven't saved any tables yet.</p>
       ) : (
         <ul className="im-saves__list">
-          {saves.map((s) => (
-            <li key={s.id}>
-              <span>
-                <strong>{s.name}</strong>
-                <span className="im-saves__meta">
-                  {s.gameId} · saved {new Date(s.updatedAt).toLocaleString()}
+          {saves.map((s) => {
+            // The server stamps `summary.autoSavedFinish` on the
+            // automatic snapshot taken when a game ends. Surface that
+            // so the user can spot replay-ready saves at a glance.
+            const isReplay = (s.summary as Record<string, unknown> | null)
+              ?.autoSavedFinish === true
+              || s.summary?.status === "finished";
+            return (
+              <li key={s.id}>
+                <span>
+                  <strong>{s.name}</strong>
+                  {isReplay ? (
+                    <span className="im-saves__tag">replay</span>
+                  ) : null}
+                  <span className="im-saves__meta">
+                    {s.gameId} · saved {new Date(s.updatedAt).toLocaleString()}
+                  </span>
                 </span>
-              </span>
-              <span>
-                <button onClick={() => load(s)}>Load into new table</button>
-                <button onClick={() => del(s)}>Delete</button>
-              </span>
-            </li>
-          ))}
+                <span>
+                  <button onClick={() => load(s)}>
+                    {isReplay ? "Replay" : "Load into new table"}
+                  </button>
+                  <button onClick={() => del(s)}>Delete</button>
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

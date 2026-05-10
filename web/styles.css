@@ -407,6 +407,20 @@ button {
   align-items: center;
 }
 .im-saves__meta { font-size: 0.85rem; color: #555; margin-left: 0.5rem; }
+.im-saves__tag {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  background: #e0f4e6;
+  color: #1f5f33;
+  border: 1px solid #92c8a0;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
 
 .im-error {
   background: #fde8e8;

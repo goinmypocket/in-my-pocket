@@ -66,6 +66,18 @@ interface LiveTable {
    *  this to offer overwrite-vs-new on subsequent saves. */
   currentSaveId: SaveId | null;
   currentSaveName: string | null;
+  /** Set when this LiveTable has already auto-snapshot itself in
+   *  response to a status flip to "finished". Guards against repeat
+   *  saves on subsequent broadcasts in the same finished session. A
+   *  fresh load of the same blob into a new LiveTable starts with
+   *  null again, so re-finishing produces a fresh auto-save. */
+  autoFinishSaveId: SaveId | null;
+  /** Bytes most recently written to `tables.live_save_blob`. Used to
+   *  short-circuit `persistLiveBlob` when the session round-trips to
+   *  the same JSON (e.g. read-only intents like REQUEST_SNAPSHOT
+   *  re-route through `routeGameMsg` and would otherwise trigger a
+   *  redundant SQLite UPDATE). Null until the first write lands. */
+  lastPersistedBytes: Buffer | null;
 }
 
 export class TableManager {
@@ -150,7 +162,7 @@ export class TableManager {
       }
     })();
 
-    const live: LiveTable = {
+    const live = this.makeLiveTable({
       id: tableId,
       gameId: opts.gameId,
       def,
@@ -162,12 +174,9 @@ export class TableManager {
       options: effectiveOptions,
       allowSpectators,
       slots,
-      spectators: new Set(),
-      attached: new Set(),
-      lastActivityAt: Date.now(),
       currentSaveId: null,
       currentSaveName: null,
-    };
+    });
     this.tables.set(tableId, live);
 
     // Host auto-claims seat 0 and is attached so they receive game
@@ -250,7 +259,7 @@ export class TableManager {
       }
     })();
 
-    const live: LiveTable = {
+    const live = this.makeLiveTable({
       id: tableId,
       gameId: row.gameId,
       def,
@@ -262,12 +271,9 @@ export class TableManager {
       options: {},
       allowSpectators: def.supportsSpectators,
       slots,
-      spectators: new Set(),
-      attached: new Set(),
-      lastActivityAt: Date.now(),
       currentSaveId: opts.saveId,
       currentSaveName: row.name,
-    };
+    });
     this.tables.set(tableId, live);
     this.persistLiveBlob(live);
     return { ok: true, tableId };
@@ -488,15 +494,7 @@ export class TableManager {
     if (!t) return { ok: false, reason: "no such table" };
     if (t.hostUserId !== callerUserId)
       return { ok: false, reason: "only host can save" };
-    const blob = t.session.serialize();
-    const desc = t.session.describe();
-    const bytes = Buffer.from(JSON.stringify(blob), "utf8");
-    const summary = {
-      playerCount: desc.playerCount,
-      maxPlayers: desc.maxPlayers,
-      status: desc.status,
-      headline: desc.headline ?? null,
-    };
+    const { bytes, summary } = this.buildSaveBlob(t);
 
     if (overwriteSaveId) {
       const existing = savesDb.getSave(this.db, overwriteSaveId);
@@ -573,15 +571,66 @@ export class TableManager {
 
   /** Push a fresh, per-user-filtered TABLES_LIST to every connected
    *  user. Called whenever the visible-tables set changes (create,
-   *  delete, status flip). */
+   *  delete, status flip).
+   *
+   *  Naïve loop is O(users × tables) describe() calls; the per-table
+   *  describe() and TableSummary build are user-independent, so we
+   *  precompute them once and only re-filter visibility per viewer.
+   *  At 100 CCU × 50 tables that drops 5000 describe() calls to 50. */
   broadcastTablesList(): void {
-    for (const userId of this.connections.getOnlineUsers()) {
-      const tables = this.listTables({ viewerUserId: userId });
-      this.connections.sendToUser(userId, {
-        type: "TABLES_LIST",
-        tables,
+    const onlineUsers = this.connections.getOnlineUsers();
+    if (onlineUsers.length === 0) return;
+    const cached = this.computeTableSummaries();
+    for (const userId of onlineUsers) {
+      const tables: TableSummary[] = [];
+      for (const entry of cached) {
+        if (entry.isPrivate && !entry.userIds.has(userId)) continue;
+        tables.push(entry.summary);
+      }
+      this.connections.sendToUser(userId, { type: "TABLES_LIST", tables });
+    }
+  }
+
+  /** One-pass build of every public TableSummary plus the (private,
+   *  user-set) bookkeeping the per-viewer filter needs. The `userIds`
+   *  set folds together hosts, seated players, and spectators — i.e.
+   *  every user who counts as "in" the table for visibility purposes
+   *  — so the per-viewer filter is a single Set.has() lookup instead
+   *  of a slot scan. */
+  private computeTableSummaries(): Array<{
+    summary: TableSummary;
+    isPrivate: boolean;
+    userIds: Set<UserId>;
+  }> {
+    const out: Array<{
+      summary: TableSummary;
+      isPrivate: boolean;
+      userIds: Set<UserId>;
+    }> = [];
+    for (const t of this.tables.values()) {
+      const desc = t.session.describe();
+      const userIds = new Set<UserId>();
+      userIds.add(t.hostUserId);
+      for (const s of t.slots) if (s.claimedBy) userIds.add(s.claimedBy.id);
+      for (const u of t.spectators) userIds.add(u);
+      out.push({
+        summary: {
+          id: t.id,
+          gameId: t.gameId,
+          name: t.name,
+          hostUserId: t.hostUserId,
+          status: t.status,
+          playerCount: desc.playerCount,
+          maxPlayers: desc.maxPlayers,
+          spectatorCount: t.spectators.size,
+          isPrivate: t.isPrivate,
+          ...(desc.headline !== undefined ? { headline: desc.headline } : {}),
+        },
+        isPrivate: t.isPrivate,
+        userIds,
       });
     }
+    return out;
   }
 
   listTables(opts: {
@@ -648,7 +697,61 @@ export class TableManager {
         tableId,
         payload,
       });
+      // Every game broadcast is a potential "session just transitioned
+      // to finished" signal. Both routeGameMsg-driven endings (host
+      // END_GAME, intent that triggers settlement) and internal-timer
+      // endings (Mockery's auto-end-game timer) ultimately call
+      // session.broadcast → this fn. Cheap status check + idempotent
+      // guard so we auto-snapshot the final state exactly once.
+      this.maybeAutoSaveOnFinish(tableId);
     };
+  }
+
+  /** First time a session reports `finished` after this LiveTable was
+   *  created (or loaded), persist a permanent save so the host can
+   *  load it later and replay the game. The session's own status
+   *  check is the trigger; subsequent broadcasts skip via the
+   *  `autoFinishSaveId` guard. Errors are swallowed to ground —
+   *  losing one auto-save is better than crashing the broadcast loop.
+   */
+  private maybeAutoSaveOnFinish(tableId: TableId): void {
+    const t = this.tables.get(tableId);
+    if (!t) return;
+    if (t.autoFinishSaveId !== null) return;
+    let status: "lobby" | "playing" | "finished";
+    try {
+      status = t.session.describe().status;
+    } catch {
+      return;
+    }
+    if (status !== "finished") return;
+    try {
+      const { bytes, summary } = this.buildSaveBlob(t, { autoSavedFinish: true });
+      const saveId = asSaveId(nanoid());
+      const finishedAt = new Date();
+      const stamp = finishedAt.toISOString().slice(0, 16).replace("T", " ");
+      const name = `${t.name} — finished ${stamp}`;
+      savesDb.insertSave(this.db, {
+        id: saveId,
+        ownerUserId: t.hostUserId,
+        gameId: t.gameId,
+        name,
+        bytes,
+        summary,
+      });
+      t.autoFinishSaveId = saveId;
+      // Push the host an updated saves list so the SavesScreen reflects
+      // the new entry without a manual refresh.
+      this.connections.sendToUser(t.hostUserId, {
+        type: "SAVES_LIST",
+        saves: this.listSavesForUser(t.hostUserId),
+      });
+    } catch (err) {
+      console.error(
+        `[in-my-pocket] auto-save on finish failed for ${tableId}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   private maybeReleaseSeats(
@@ -669,20 +772,81 @@ export class TableManager {
 
   /** Snapshot the table's session and overwrite the persisted blob.
    *  Called after every state-mutating op so a crash recovery on the
-   *  next platform start sees the latest authoritative state.
+   *  next platform start sees the latest authoritative state. We
+   *  always run the JSON encode (the session itself doesn't expose a
+   *  dirty flag), but skip the SQLite write when the produced bytes
+   *  are byte-identical to the last successful write — saves the
+   *  fsync on read-only routed messages.
    *  Failures are logged but never thrown — losing one snapshot is
    *  better than dropping the in-memory game. */
   private persistLiveBlob(t: LiveTable): void {
     try {
       const blob = t.session.serialize();
       const bytes = Buffer.from(JSON.stringify(blob), "utf8");
+      if (t.lastPersistedBytes && bytes.equals(t.lastPersistedBytes)) {
+        return;
+      }
       tablesDb.setLiveSaveBlob(this.db, t.id, bytes);
+      t.lastPersistedBytes = bytes;
     } catch (err) {
       console.error(
         `[in-my-pocket] failed to persist live save for ${t.id}:`,
         err instanceof Error ? err.message : err,
       );
     }
+  }
+
+  /** Build the (bytes, summary) pair that both manual SAVE_TABLE and
+   *  auto-save-on-finish need to write a row to the `saves` table.
+   *  Centralised so adding a summary field, swapping the encoding,
+   *  or future-proofing against a session blob shape change is a
+   *  single edit instead of two parallel ones. */
+  private buildSaveBlob(
+    t: LiveTable,
+    extraSummary?: Record<string, unknown>,
+  ): { bytes: Buffer; summary: Record<string, unknown> } {
+    const blob = t.session.serialize();
+    const desc = t.session.describe();
+    const bytes = Buffer.from(JSON.stringify(blob), "utf8");
+    const summary: Record<string, unknown> = {
+      playerCount: desc.playerCount,
+      maxPlayers: desc.maxPlayers,
+      status: desc.status,
+      headline: desc.headline ?? null,
+      ...(extraSummary ?? {}),
+    };
+    return { bytes, summary };
+  }
+
+  /** Construct a fresh LiveTable from the bag of fields callers vary,
+   *  filling in the boilerplate (empty Sets, null bookkeeping fields,
+   *  default lastActivityAt) that all three creation paths
+   *  (createTable, loadTableFromSave, crash-recovery) shared
+   *  verbatim. Adding a new bookkeeping field stays a one-liner here
+   *  rather than three coordinated edits. */
+  private makeLiveTable(opts: {
+    id: TableId;
+    gameId: GameId;
+    def: GameDefinition;
+    session: GameSession;
+    hostUserId: UserId;
+    name: string;
+    isPrivate: boolean;
+    status: "lobby" | "playing" | "finished";
+    options: Record<string, unknown>;
+    allowSpectators: boolean;
+    slots: TableSlot[];
+    currentSaveId: SaveId | null;
+    currentSaveName: string | null;
+  }): LiveTable {
+    return {
+      ...opts,
+      spectators: new Set(),
+      attached: new Set(),
+      lastActivityAt: Date.now(),
+      autoFinishSaveId: null,
+      lastPersistedBytes: null,
+    };
   }
 
   private snapshotState(t: LiveTable): TableState {
@@ -859,7 +1023,7 @@ export class TableManager {
         tablesDb.updateTableStatus(this.db, row.id, "playing");
       }
 
-      this.tables.set(row.id, {
+      this.tables.set(row.id, this.makeLiveTable({
         id: row.id,
         gameId: row.gameId,
         def,
@@ -871,12 +1035,9 @@ export class TableManager {
         options: row.options,
         allowSpectators: row.allowSpectators,
         slots,
-        spectators: new Set(),
-        attached: new Set(),
-        lastActivityAt: Date.now(),
         currentSaveId: null,
         currentSaveName: null,
-      });
+      }));
       recovered++;
     }
 

@@ -98,6 +98,7 @@ function Shell(): ReactNode {
           <TableScreen
             tableId={route.tableId}
             onLeave={() => setRoute({ kind: "tables" })}
+            onOpenSaves={() => setRoute({ kind: "saves" })}
           />
         )}
         {route.kind === "saves" && (

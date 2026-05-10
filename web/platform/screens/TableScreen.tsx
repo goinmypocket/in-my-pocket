@@ -12,9 +12,10 @@ import { useProvideDrawerContent, useTableDrawer } from "../TableDrawerContext";
 interface Props {
   tableId: string;
   onLeave(): void;
+  onOpenSaves(): void;
 }
 
-export function TableScreen({ tableId, onLeave }: Props) {
+export function TableScreen({ tableId, onLeave, onOpenSaves }: Props) {
   const { send, subscribe, status } = useClient();
   const { user } = useAuth();
   const drawer = useTableDrawer();
@@ -74,6 +75,10 @@ export function TableScreen({ tableId, onLeave }: Props) {
         onSaveClick={() => {
           setSaveDialog(true);
           drawer.close();
+        }}
+        onOpenSaves={() => {
+          drawer.close();
+          onOpenSaves();
         }}
         onBack={() => {
           drawer.close();
@@ -174,6 +179,7 @@ interface SidebarProps {
   mySeat: TableState["slots"][number] | null;
   send: ClientSend;
   onSaveClick(): void;
+  onOpenSaves(): void;
   onBack(): void;
   onGiveUpSeat(): void;
   error: string | null;
@@ -187,6 +193,7 @@ function SidebarContent({
   mySeat,
   send,
   onSaveClick,
+  onOpenSaves,
   onBack,
   onGiveUpSeat,
   error,
@@ -312,6 +319,10 @@ function SidebarContent({
             : "Save…"}
         </button>
       )}
+
+      <button onClick={onOpenSaves}>
+        Saved games / replays
+      </button>
 
       {!mySeat && state.status === "lobby" && (
         <p className="im-table__hint">
