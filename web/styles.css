@@ -1,20 +1,59 @@
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
+
+/* The platform owns the document theme. Lazy-loaded games declare
+   their colors and native control schemes only on their own roots. */
+:root {
+  color-scheme: light;
+  --im-bg: #f4f5f7;
+  --im-surface: #ffffff;
+  --im-text: #1a1d23;
+  --im-muted: #555d69;
+  --im-control-border: #7a838f;
+  --im-focus: #2459b8;
+}
+
+html, body, #root { min-height: 100%; }
 
 body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
-  background: #f4f5f7;
-  color: #1a1d23;
+  background: var(--im-bg);
+  color: var(--im-text);
 }
 
-button {
+:where(button, input, select, textarea, optgroup, option) {
+  font: inherit;
+  color: var(--im-text);
+  background-color: var(--im-surface);
+  border: 1px solid var(--im-control-border);
+  border-radius: 4px;
+  accent-color: var(--im-focus);
+}
+:where(button) {
   cursor: pointer;
+  padding: 0.35rem 0.65rem;
+}
+:where(button:hover:not(:disabled)) { background-color: #e8edf5; }
+:where(button:disabled) { cursor: not-allowed; }
+:where(input, textarea)::placeholder {
+  color: var(--im-muted);
+  opacity: 1;
+}
+:focus-visible {
+  outline: 2px solid var(--im-focus);
+  outline-offset: 3px;
+}
+
+.im-shell, .im-login, .im-modal {
+  color-scheme: light;
+  color: var(--im-text);
 }
 
 .im-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  background: var(--im-bg);
 }
 
 .im-shell__nav {
@@ -26,11 +65,12 @@ button {
   color: #f4f5f7;
   position: relative;
   z-index: 20;
+  --im-focus: #9bc5ff;
 }
 .im-shell__hamburger {
   background: transparent;
   color: inherit;
-  border: 1px solid #555;
+  border: 1px solid #858d99;
   border-radius: 4px;
   width: 2rem;
   height: 2rem;
@@ -52,6 +92,7 @@ button {
   bottom: 0;
   width: min(320px, 90vw);
   background: white;
+  color: var(--im-text);
   z-index: 40;
   padding: 1rem;
   overflow-y: auto;
@@ -87,7 +128,7 @@ button {
 .im-shell__user button {
   background: transparent;
   color: inherit;
-  border: 1px solid #555;
+  border: 1px solid #858d99;
   padding: 0.25rem 0.6rem;
   border-radius: 3px;
 }
@@ -111,7 +152,7 @@ button {
 }
 .im-admin__nav .is-active {
   font-weight: 600;
-  outline: 2px solid var(--warm-gold, #c79b3f);
+  outline: 2px solid var(--im-focus);
 }
 .im-admin__section h2 {
   margin-top: 1.25rem;
@@ -192,7 +233,7 @@ button {
 .im-login__tabs button {
   flex: 1;
   padding: 0.5rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--im-control-border);
   background: #f8f8f8;
   border-radius: 4px;
 }
@@ -205,7 +246,7 @@ button {
 .im-login label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
 .im-login input {
   padding: 0.5rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--im-control-border);
   border-radius: 4px;
   font-size: 1rem;
 }
@@ -263,7 +304,7 @@ button {
   gap: 0.75rem;
 }
 .im-create-form label { display: flex; flex-direction: column; gap: 0.25rem; }
-.im-create-form input, .im-create-form select { padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+.im-create-form input, .im-create-form select { padding: 0.5rem; border: 1px solid var(--im-control-border); border-radius: 4px; }
 .im-create-form__check { flex-direction: row !important; align-items: center; gap: 0.5rem; }
 
 .im-table {
@@ -383,7 +424,7 @@ button {
 .im-modal hr { width: 100%; border: 0; border-top: 1px solid #e5e7eb; }
 .im-modal input {
   padding: 0.5rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--im-control-border);
   border-radius: 4px;
   font-size: 1rem;
 }
@@ -429,4 +470,15 @@ button {
   border-radius: 4px;
   font-size: 0.9rem;
   margin-top: 0.5rem;
+}
+
+@media (max-width: 40rem) {
+  .im-shell__nav { flex-wrap: wrap; gap: 0.5rem; padding: 0.75rem; }
+  .im-shell__user { flex-wrap: wrap; gap: 0.5rem; }
+  .im-shell__content { padding: 1rem; }
+  .im-tables__header { flex-wrap: wrap; gap: 0.5rem; }
+  .im-tables__header > div { margin-left: 0; flex-wrap: wrap; }
+  .im-table { grid-template-columns: 1fr; }
+  .im-table--playing { margin: -1rem; }
+  .im-login { margin: 2rem auto; width: min(360px, calc(100% - 2rem)); padding: 1.5rem; }
 }
